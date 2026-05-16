@@ -4,6 +4,7 @@ use libadwaita as adw;
 use adw::prelude::*;
 use gtk::{gio, glib};
 use hearthstone_linux::{
+    auth,
     config::{AppConfig, Locale, Region},
     install::{
         launcher,
@@ -13,6 +14,7 @@ use hearthstone_linux::{
 };
 use std::{
     cell::{Cell, RefCell},
+    path::Path,
     process::Child,
     rc::Rc,
     sync::{
@@ -28,8 +30,30 @@ pub fn run() {
         .flags(gio::ApplicationFlags::HANDLES_OPEN)
         .build();
     app.connect_startup(|_| configure_color_scheme());
+    app.connect_open(handle_open);
     app.connect_activate(build_window);
     app.run();
+}
+
+fn handle_open(_app: &adw::Application, files: &[gio::File], _hint: &str) {
+    let paths = match AppPaths::discover() {
+        Ok(paths) => paths,
+        Err(error) => {
+            tracing::error!(error = %format!("{error:#}"), "failed to resolve paths for auth callback");
+            return;
+        }
+    };
+
+    for file in files {
+        let uri = file.uri();
+        tracing::info!(uri = %uri, "handling auth callback from open event");
+        match auth::handle_callback_uri(&paths, uri.as_str()) {
+            Ok(()) => tracing::info!("auth callback handled"),
+            Err(error) => {
+                tracing::error!(error = %format!("{error:#}"), "failed to handle auth callback")
+            }
+        }
+    }
 }
 
 fn configure_color_scheme() {
@@ -211,6 +235,7 @@ fn build_window(app: &adw::Application) {
             });
 
             let paths = paths.clone();
+            let config = config.clone();
             let install_button = install_button.clone();
             let install_cancel = install_cancel.clone();
             let status = status.clone();
@@ -241,6 +266,7 @@ fn build_window(app: &adw::Application) {
                             progress.set_visible(false);
                             *install_cancel.borrow_mut() = None;
                             set_install_idle(&install_button);
+                            sync_config_from_disk(&paths, &config);
                             update_status(&status, &version, &paths);
                             return glib::ControlFlow::Break;
                         }
@@ -258,6 +284,7 @@ fn build_window(app: &adw::Application) {
                             progress.set_visible(false);
                             *install_cancel.borrow_mut() = None;
                             set_install_idle(&install_button);
+                            sync_config_from_disk(&paths, &config);
                             update_status(&status, &version, &paths);
                             return glib::ControlFlow::Break;
                         }
@@ -287,6 +314,7 @@ fn build_window(app: &adw::Application) {
             if paths.game_token().exists() {
                 tracing::debug!("login token already exists");
                 mark_logged_in(&paths, &config);
+                sync_config_from_disk(&paths, &config);
                 status.set_text("Already logged in");
                 update_status(&status, &version, &paths);
                 update_login_button(&login_button, &paths);
@@ -294,9 +322,13 @@ fn build_window(app: &adw::Application) {
             }
 
             let mut current = config.borrow().clone();
+            preserve_install_metadata(&paths, &mut current);
             current.game_dir = Some(paths.game_dir.clone());
             let login_url = current.region.login_url();
             let _ = current.save(&paths.config_file);
+            if let Err(error) = ensure_auth_scheme_handlers() {
+                tracing::warn!(error = %format!("{error:#}"), "failed to register auth URI handlers");
+            }
 
             login_waiting.set(true);
             set_login_waiting(&login_button);
@@ -320,6 +352,7 @@ fn build_window(app: &adw::Application) {
                     tracing::info!("browser login completed");
                     login_waiting.set(false);
                     mark_logged_in(&paths, &config);
+                    sync_config_from_disk(&paths, &config);
                     status.set_text("Login complete");
                     update_status(&status, &version, &paths);
                     update_login_button(&login_button, &paths);
@@ -407,8 +440,10 @@ fn build_window(app: &adw::Application) {
         let status = status.clone();
         let version = version.clone();
         let login = login.clone();
+        let config = config.clone();
         refresh.connect_clicked(move |_| {
             tracing::debug!("refresh requested from UI");
+            sync_config_from_disk(&paths, &config);
             update_status(&status, &version, &paths);
             update_login_button(&login, &paths);
         });
@@ -426,12 +461,27 @@ fn update_status(status: &gtk::Label, version: &gtk::Label, paths: &AppPaths) {
         (false, _) => status.set_text("Not Installed"),
     }
 
-    let config = AppConfig::load_or_default(&paths.config_file).unwrap_or_default();
+    let config = reconcile_status_config(paths, token);
+    let login = if config.logged_in && token {
+        "Logged in"
+    } else if token {
+        "Token present"
+    } else {
+        "Logged out"
+    };
+    let game = config
+        .installed_version
+        .as_deref()
+        .filter(|version| !version.is_empty())
+        .unwrap_or("Not installed");
+    let unity = config
+        .unity_version
+        .as_deref()
+        .filter(|version| !version.is_empty())
+        .unwrap_or("Not installed");
     version.set_text(&format!(
-        "Region {} · Locale {} · Version {}",
-        config.region,
-        config.locale,
-        config.installed_version.as_deref().unwrap_or("none")
+        "Login: {login} · Game: {game} · Unity: {unity} · {} / {}",
+        config.region, config.locale
     ));
 }
 
@@ -501,6 +551,7 @@ fn set_launch_stopping(button: &gtk::Button) {
 
 fn mark_logged_in(paths: &AppPaths, config: &Rc<RefCell<AppConfig>>) {
     let mut current = config.borrow_mut();
+    preserve_install_metadata(paths, &mut current);
     current.game_dir = Some(paths.game_dir.clone());
     current.logged_in = true;
     current.last_login_at = std::time::SystemTime::now()
@@ -508,4 +559,83 @@ fn mark_logged_in(paths: &AppPaths, config: &Rc<RefCell<AppConfig>>) {
         .ok()
         .map(|duration| duration.as_secs().to_string());
     let _ = current.save(&paths.config_file);
+}
+
+fn sync_config_from_disk(paths: &AppPaths, config: &Rc<RefCell<AppConfig>>) {
+    if let Ok(saved) = AppConfig::load_or_default(&paths.config_file) {
+        *config.borrow_mut() = saved;
+    }
+}
+
+fn preserve_install_metadata(paths: &AppPaths, config: &mut AppConfig) {
+    let Ok(saved) = AppConfig::load_or_default(&paths.config_file) else {
+        return;
+    };
+    if saved.installed_version.is_some() {
+        config.installed_version = saved.installed_version;
+    }
+    if saved.unity_version.is_some() {
+        config.unity_version = saved.unity_version;
+    }
+}
+
+fn reconcile_status_config(paths: &AppPaths, token_exists: bool) -> AppConfig {
+    let mut config = AppConfig::load_or_default(&paths.config_file).unwrap_or_default();
+    let should_save = config.logged_in != token_exists || config.game_dir.is_none();
+    config.logged_in = token_exists;
+    if config.game_dir.is_none() {
+        config.game_dir = Some(paths.game_dir.clone());
+    }
+    if should_save {
+        let _ = config.save(&paths.config_file);
+    }
+    config
+}
+
+fn ensure_auth_scheme_handlers() -> std::io::Result<()> {
+    let exe = std::env::current_exe()?;
+    let Some(applications_dir) = std::env::var_os("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .map(std::path::PathBuf::from)
+                .map(|home| home.join(".local/share"))
+        })
+        .map(|data_home| data_home.join("applications"))
+    else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&applications_dir)?;
+
+    let desktop_id = "io.github.hearthstone_linux.desktop";
+    let desktop_file = applications_dir.join(desktop_id);
+    std::fs::write(&desktop_file, user_desktop_entry(&exe))?;
+
+    let _ = std::process::Command::new("update-desktop-database")
+        .arg(&applications_dir)
+        .status();
+    for mime in [
+        "x-scheme-handler/wtcg",
+        "x-scheme-handler/blizzard-hearthstone",
+        "x-scheme-handler/hearthstone-linux",
+    ] {
+        let _ = std::process::Command::new("xdg-mime")
+            .args(["default", desktop_id, mime])
+            .status();
+    }
+
+    Ok(())
+}
+
+fn user_desktop_entry(exe: &Path) -> String {
+    format!(
+        "[Desktop Entry]\nType=Application\nName=Hearthstone Linux\nExec={} %u\nIcon=io.github.hearthstone_linux\nCategories=Game;\nMimeType=x-scheme-handler/wtcg;x-scheme-handler/blizzard-hearthstone;x-scheme-handler/hearthstone-linux;\nStartupNotify=true\n",
+        shell_quote_path(exe)
+    )
+}
+
+fn shell_quote_path(path: &Path) -> String {
+    let value = path.to_string_lossy();
+    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{escaped}\"")
 }

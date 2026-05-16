@@ -1,3 +1,4 @@
+use crate::{paths::AppPaths, AppConfig};
 use aes::Aes128;
 use anyhow::{Context, Result};
 use cbc::cipher::{block_padding::Pkcs7, BlockEncryptMut, KeyIvInit};
@@ -60,6 +61,22 @@ pub fn write_encrypted_token_for_current_user(path: &Path, token: &str) -> Resul
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(path, encrypted).with_context(|| format!("failed to write {}", path.display()))
+}
+
+pub fn handle_callback_uri(paths: &AppPaths, uri: &str) -> Result<()> {
+    let mut config = AppConfig::load_or_default(&paths.config_file)?;
+    let game_dir = config.game_dir.clone().unwrap_or(paths.game_dir.clone());
+    let token = extract_token_from_uri(uri)?;
+    write_encrypted_token_for_current_user(&game_dir.join("token"), &token)?;
+    config.game_dir = Some(game_dir);
+    config.logged_in = true;
+    config.last_login_at = Some(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs()
+            .to_string(),
+    );
+    config.save(&paths.config_file)
 }
 
 pub fn encrypt_token_for_user(token: &str, username: &str) -> Result<Vec<u8>> {

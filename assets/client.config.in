@@ -1,4 +1,4 @@
 Aurora.ClientCheck=false
 Aurora.Env.Override=1
-Aurora.Env={{region}}.actual.battle.net
+Aurora.Env={{aurora_env}}
 Localization.Locale={{locale}}

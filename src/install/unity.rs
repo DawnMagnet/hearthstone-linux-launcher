@@ -52,7 +52,7 @@ pub async fn ensure_unity_player_with_progress(
     let marker = game_dir.join(".unity");
     if marker.exists()
         && std::fs::read_to_string(&marker).unwrap_or_default().trim() == unity_version
-        && game_dir.join("Bin/Hearthstone.x86_64").exists()
+        && unity_player_files_exist(game_dir)
     {
         debug!(version = %unity_version, "Unity player already installed");
         return Ok(unity_version);
@@ -398,6 +398,17 @@ fn copy_unity_files(unity_root: &Path, game_dir: &Path) -> Result<()> {
     )?;
     make_executable(&bin.join("Hearthstone.x86_64"))?;
     Ok(())
+}
+
+fn unity_player_files_exist(game_dir: &Path) -> bool {
+    let bin = game_dir.join("Bin");
+    let data = bin.join("Hearthstone_Data");
+    bin.join("Hearthstone.x86_64").exists()
+        && bin.join("UnityPlayer.so").exists()
+        && data
+            .join("MonoBleedingEdge/x86_64/libmonobdwgc-2.0.so")
+            .exists()
+        && data.join("MonoBleedingEdge/etc/mono/config").exists()
 }
 
 fn copy_dir(from: &Path, to: &Path) -> Result<()> {

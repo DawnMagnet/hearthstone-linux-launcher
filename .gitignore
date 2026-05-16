@@ -3,3 +3,4 @@ target/
 AppDir/
 result
 *.AppImage
+.direnv

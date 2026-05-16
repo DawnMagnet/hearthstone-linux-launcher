@@ -48,23 +48,8 @@ fn main() -> Result<()> {
     if let Some(uri) = callback {
         tracing::info!("handling auth callback");
         let paths = hearthstone_linux::paths::AppPaths::discover()?;
-        let mut config = hearthstone_linux::AppConfig::load_or_default(&paths.config_file)?;
-        let game_dir = config.game_dir.clone().unwrap_or(paths.game_dir);
-        let token = hearthstone_linux::auth::extract_token_from_uri(&uri)?;
-        hearthstone_linux::auth::write_encrypted_token_for_current_user(
-            &game_dir.join("token"),
-            &token,
-        )?;
-        config.game_dir = Some(game_dir.clone());
-        config.logged_in = true;
-        config.last_login_at = Some(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs()
-                .to_string(),
-        );
-        config.save(&paths.config_file)?;
-        println!("Login token written for {:?}", game_dir);
+        hearthstone_linux::auth::handle_callback_uri(&paths, &uri)?;
+        println!("Login token written for {:?}", paths.game_dir);
         return Ok(());
     }
 

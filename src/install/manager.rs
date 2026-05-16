@@ -138,6 +138,7 @@ impl InstallManager {
         )?;
 
         config.game_dir = Some(self.paths.game_dir.clone());
+        preserve_login_metadata(config, &self.paths);
         config.save(&self.paths.config_file)?;
         info!("install/update completed");
         event(TaskEvent::Finished("Ready to play".into()));
@@ -151,6 +152,15 @@ fn check_cancelled(cancel: Option<&Arc<AtomicBool>>) -> Result<()> {
         anyhow::bail!("installation cancelled");
     }
     Ok(())
+}
+
+fn preserve_login_metadata(config: &mut AppConfig, paths: &AppPaths) {
+    let saved = AppConfig::load_or_default(&paths.config_file).ok();
+    let token_exists = paths.game_token().exists();
+    if saved.as_ref().is_some_and(|saved| saved.logged_in) || token_exists {
+        config.logged_in = true;
+        config.last_login_at = saved.and_then(|saved| saved.last_login_at);
+    }
 }
 
 fn format_unity_download_progress(progress: &unity::UnityDownloadProgress) -> String {

@@ -41,11 +41,20 @@
         ];
         buildInputs = with pkgs; [
           cairo
+          dbus.lib
           gdk-pixbuf
           glib
           graphene
           gtk4
           libadwaita
+          libglvnd
+          libxcursor
+          libxi
+          libxinerama
+          libxrandr
+          libxscrnsaver
+          libxxf86vm
+          mesa
           pango
         ];
       in {

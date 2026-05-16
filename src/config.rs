@@ -34,6 +34,15 @@ impl Region {
         }
     }
 
+    pub fn aurora_env(self) -> &'static str {
+        match self {
+            Region::Cn => "cn.actual.battlenet.com.cn",
+            Region::Eu => "eu.actual.battle.net",
+            Region::Us => "us.actual.battle.net",
+            Region::Kr => "kr.actual.battle.net",
+        }
+    }
+
     pub fn login_url(self) -> &'static str {
         match self {
             Region::Cn => "https://account.battlenet.com.cn/login/zh/?ref=blizzard-hearthstone://localhost:0/&app=wtcg-and&showCredentials=true",

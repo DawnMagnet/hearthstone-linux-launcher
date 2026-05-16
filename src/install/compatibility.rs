@@ -11,7 +11,7 @@ pub fn install_compatibility_files(game_dir: &Path, region: Region, locale: Loca
         "installing compatibility files"
     );
     let config = include_str!("../../assets/client.config.in")
-        .replace("{{region}}", region.as_str())
+        .replace("{{aurora_env}}", region.aurora_env())
         .replace("{{locale}}", locale.as_str());
     std::fs::write(game_dir.join("client.config"), config)?;
 
