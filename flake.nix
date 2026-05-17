@@ -26,7 +26,7 @@
             "clippy"
           ];
         };
-        source = pkgs.lib.cleanSourceWith {
+        rustSource = pkgs.lib.cleanSourceWith {
           src = ./.;
           filter =
             path: type:
@@ -35,12 +35,14 @@
               relative = pkgs.lib.removePrefix "${root}/" (toString path);
               top = builtins.head (pkgs.lib.splitString "/" relative);
             in
-            !(builtins.elem top [
-              ".direnv"
-              "AppDir"
-              "result"
-              "target"
-            ]);
+            builtins.elem top [
+              "Cargo.lock"
+              "Cargo.toml"
+              "assets"
+              "crates"
+              "data"
+              "src"
+            ];
         };
         pname = "hearthstone-linux-gui";
         packageVersion = "0.1.1";
@@ -163,7 +165,7 @@
         hearthstonePackage = pkgs.rustPlatform.buildRustPackage {
           inherit pname;
           version = packageVersion;
-          src = source;
+          src = rustSource;
           cargoLock.lockFile = ./Cargo.lock;
           inherit nativeBuildInputs buildInputs;
           cargoBuildFlags = [ "--workspace" ];
@@ -197,13 +199,19 @@
         };
         appimageTool = pkgs.appimageTools.extractType2 {
           pname = "appimagetool";
-          version = "12";
+          version = "continuous";
           src = pkgs.fetchurl {
-            url = "https://github.com/AppImage/AppImageKit/releases/download/12/appimagetool-x86_64.AppImage";
-            sha256 = "04ws94q71bwskmhizhwmaf41ma4wabvfgjgkagr8wf3vakgv866r";
+            url = "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage";
+            sha256 = "sha256-ptceK2zWb46NFsN60WRliYXgz1/KqVDJCkgokMudE+A=";
           };
         };
-        portableLibraryPath = pkgs.lib.makeLibraryPath portableRuntimeInputs;
+        appimageRuntime = pkgs.fetchurl {
+          url = "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64";
+          sha256 = "sha256-okGdzkdWg5WuecAf+ppaNB3TOVgTUv8QTQc1J1Qxd+U=";
+        };
+        portableRuntimeClosure = pkgs.closureInfo {
+          rootPaths = portableRuntimeInputs ++ [ pkgs.stdenv.cc.cc.lib ];
+        };
         appDir =
           pkgs.runCommand "hearthstone-linux-gui-AppDir"
             {
@@ -256,19 +264,29 @@
                 fi
               }
 
-              IFS=: read -r -a lib_dirs <<< "${portableLibraryPath}"
-              for dir in "''${lib_dirs[@]}"; do
-                if [ -d "$dir" ]; then
+              while IFS= read -r input; do
+                lib_dir="$input/lib"
+                if [ ! -d "$lib_dir" ]; then
+                  continue
+                fi
+                while IFS= read -r lib; do
+                  copy_lib "$lib"
+                done < <(find "$lib_dir" -maxdepth 1 \( -type f -o -type l \) -name '*.so*')
+
+                if [ -d "$lib_dir/libproxy" ]; then
                   while IFS= read -r lib; do
                     copy_lib "$lib"
-                  done < <(find "$dir" -maxdepth 1 \( -type f -o -type l \) -name '*.so*')
+                  done < <(find "$lib_dir/libproxy" -maxdepth 1 \( -type f -o -type l \) -name '*.so*')
                 fi
-              done
-              for lib in \
-                ${pkgs.stdenv.cc.cc.lib}/lib/libstdc++.so* \
-                ${pkgs.stdenv.cc.cc.lib}/lib/libgcc_s.so*; do
-                [ -e "$lib" ] || continue
-                copy_lib "$lib"
+              done < ${portableRuntimeClosure}/store-paths
+
+              for lib_dir in \
+                ${pkgs.stdenv.cc.cc.lib}/lib \
+                ${pkgs.glibc.out}/lib; do
+                [ -d "$lib_dir" ] || continue
+                while IFS= read -r lib; do
+                  copy_lib "$lib"
+                done < <(find "$lib_dir" -maxdepth 1 \( -type f -o -type l \) -name '*.so*')
               done
 
               for input in ${pkgs.lib.concatStringsSep " " portableRuntimeInputs}; do
@@ -312,11 +330,51 @@
               EOF
               chmod 755 $out/usr/bin/patchelf
 
+              fix_portable_elf() {
+                local elf="$1"
+                case "$(basename "$elf")" in
+                  ld-*.so* | ld-linux*.so*)
+                    return 0
+                    ;;
+                esac
+                readelf -d "$elf" >/dev/null 2>&1 || return 0
+
+                while IFS= read -r needed; do
+                  local basename_needed
+                  basename_needed="$(basename "$needed")"
+                  if [ -e "$out/usr/lib/$basename_needed" ]; then
+                    patchelf --replace-needed "$needed" "$basename_needed" "$elf"
+                  fi
+                done < <(
+                  readelf -d "$elf" \
+                    | sed -n 's/.*Shared library: \[\(\/nix\/store\/[^]]*\/lib\/[^]]*\)\].*/\1/p'
+                )
+              }
+
+              while IFS= read -r -d "" elf; do
+                fix_portable_elf "$elf"
+              done < <(find $out/usr/bin $out/usr/lib -type f -print0)
+
               patchelf --set-rpath '$ORIGIN/../lib:$ORIGIN/../lib/hearthstone-linux-gui-runtime' \
                 $out/usr/bin/hearthstone-linux-gui
               patchelf --set-rpath '$ORIGIN:$ORIGIN/../../usr/lib:$ORIGIN/../../usr/lib/hearthstone-linux-gui-runtime' \
                 $out/usr/lib/hearthstone-linux-gui-runtime/patchelf
+              while IFS= read -r -d "" elf; do
+                readelf -d "$elf" >/dev/null 2>&1 || continue
+                case "$elf" in
+                  $out/usr/bin/* | $out/usr/lib/hearthstone-linux-gui-runtime/patchelf)
+                    ;;
+                  */ld-*.so* | */ld-linux*.so*)
+                    ;;
+                  *)
+                    patchelf --set-rpath '$ORIGIN:$ORIGIN/hearthstone-linux-gui-runtime' "$elf"
+                    ;;
+                esac
+              done < <(find $out/usr/lib -type f -print0)
+
               find $out/usr/bin $out/usr/lib -type f -executable \
+                ! -name 'ld-*.so*' \
+                ! -name 'ld-linux*.so*' \
                 -exec strip --strip-unneeded {} + 2>/dev/null || true
             '';
         appImage =
@@ -333,27 +391,36 @@
               mkdir -p $out
               cp -a ${appimageTool} appimagetool
               chmod -R u+w appimagetool
-              patchelf --set-interpreter ${pkgs.glibc.out}/lib/ld-linux-x86-64.so.2 \
-                --set-rpath ${
+              patch_dynamic_tool() {
+                local tool="$1"
+                local rpath="$2"
+                [ -e "$tool" ] || return 0
+                readelf -l "$tool" 2>/dev/null | grep -q 'Requesting program interpreter' || return 0
+                patchelf --set-interpreter ${pkgs.glibc.out}/lib/ld-linux-x86-64.so.2 \
+                  --set-rpath "$rpath" \
+                  "$tool"
+              }
+
+              patch_dynamic_tool appimagetool/usr/bin/appimagetool \
+                "${
                   pkgs.lib.makeLibraryPath [
                     pkgs.glibc
                     pkgs.zlib
                     pkgs.glib
                     pkgs.libuuid
                   ]
-                }:$(pwd)/appimagetool/usr/lib \
-                appimagetool/usr/bin/appimagetool
-              patchelf --set-interpreter ${pkgs.glibc.out}/lib/ld-linux-x86-64.so.2 \
-                --set-rpath ${
+                }:$(pwd)/appimagetool/usr/lib"
+              patch_dynamic_tool appimagetool/usr/lib/appimagekit/mksquashfs \
+                "${
                   pkgs.lib.makeLibraryPath [
                     pkgs.glibc
                     pkgs.zlib
                   ]
-                } \
-                appimagetool/usr/lib/appimagekit/mksquashfs
+                }"
               cp -a ${appDir} AppDir
               chmod -R u+w AppDir
               ARCH=x86_64 ./appimagetool/usr/bin/appimagetool \
+                --runtime-file ${appimageRuntime} \
                 AppDir $out/${appImageFile}
             '';
         packageFromAppImage =

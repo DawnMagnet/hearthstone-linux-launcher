@@ -7,6 +7,36 @@ export PATH="$APPDIR/usr/bin:$PATH"
 export XDG_DATA_DIRS="$APPDIR/usr/share${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
 export LD_LIBRARY_PATH="$APPDIR/usr/lib:$APPDIR/usr/lib/hearthstone-linux-gui-runtime${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
+prepend_existing_path() {
+  var="$1"
+  dir="$2"
+  [ -d "$dir" ] || return 0
+  eval "current=\${$var:-}"
+  if [ -n "$current" ]; then
+    eval "export $var=\"$dir:\$current\""
+  else
+    eval "export $var=\"$dir\""
+  fi
+}
+
+append_existing_path() {
+  var="$1"
+  dir="$2"
+  [ -d "$dir" ] || return 0
+  eval "current=\${$var:-}"
+  if [ -n "$current" ]; then
+    eval "export $var=\"\$current:$dir\""
+  else
+    eval "export $var=\"$dir\""
+  fi
+}
+
+append_existing_path LD_LIBRARY_PATH /run/opengl-driver/lib
+append_existing_path LD_LIBRARY_PATH /run/current-system/sw/share/nix-ld/lib
+append_existing_path LD_LIBRARY_PATH /run/current-system/sw/lib
+prepend_existing_path LIBGL_DRIVERS_PATH /run/opengl-driver/lib/dri
+prepend_existing_path __EGL_VENDOR_LIBRARY_DIRS /run/opengl-driver/share/glvnd/egl_vendor.d
+
 if [ -d "$APPDIR/usr/lib/girepository-1.0" ]; then
   export GI_TYPELIB_PATH="$APPDIR/usr/lib/girepository-1.0${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}"
 fi
