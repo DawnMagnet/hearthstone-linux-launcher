@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-labelledby="title desc">
+  <title id="title">hearthstone-linux-gui desktop launcher</title>
+  <desc id="desc">A GTK4-style launcher window showing install, login, and play actions for Hearthstone on Linux.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#102a43"/>
+      <stop offset="0.48" stop-color="#27546b"/>
+      <stop offset="1" stop-color="#c88a2d"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#f4f7fb"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#071923" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="560" fill="url(#bg)"/>
+  <path d="M0 460 C170 390 310 495 465 422 C660 330 745 285 910 349 C1037 398 1102 375 1200 325 L1200 560 L0 560 Z" fill="#f2c14e" opacity="0.22"/>
+  <path d="M0 95 C165 160 315 84 454 132 C620 190 710 102 878 118 C1022 132 1115 210 1200 180 L1200 0 L0 0 Z" fill="#9ed8db" opacity="0.12"/>
+  <g transform="translate(600 48)">
+    <text x="0" y="40" text-anchor="middle" fill="#fff7df" font-family="Inter, Segoe UI, sans-serif" font-size="42" font-weight="800">hearthstone-linux-gui</text>
+    <text x="0" y="76" text-anchor="middle" fill="#e8f3f3" font-family="Inter, Segoe UI, sans-serif" font-size="20">Native GTK4 launcher. One-click install, login, update, and play.</text>
+  </g>
+  <g transform="translate(238 165)" filter="url(#shadow)">
+    <rect width="724" height="292" rx="18" fill="url(#panel)"/>
+    <rect width="724" height="50" rx="18" fill="#e8eef5"/>
+    <rect y="34" width="724" height="20" fill="#e8eef5"/>
+    <circle cx="28" cy="27" r="7" fill="#d95f5f"/>
+    <circle cx="52" cy="27" r="7" fill="#d6a436"/>
+    <circle cx="76" cy="27" r="7" fill="#4d9f62"/>
+    <text x="362" y="32" text-anchor="middle" fill="#273746" font-family="Inter, Segoe UI, sans-serif" font-size="15" font-weight="700">hearthstone-linux-gui</text>
+    <text x="44" y="92" fill="#16222f" font-family="Inter, Segoe UI, sans-serif" font-size="30" font-weight="800">Ready</text>
+    <text x="44" y="122" fill="#607080" font-family="Inter, Segoe UI, sans-serif" font-size="16">Login: Logged in · Game: latest · Unity: installed · us / enUS</text>
+    <rect x="44" y="145" width="636" height="15" rx="7.5" fill="#d7e2ea"/>
+    <rect x="44" y="145" width="636" height="15" rx="7.5" fill="#2f9e8f"/>
+    <g font-family="Inter, Segoe UI, sans-serif" font-size="15">
+      <text x="44" y="202" fill="#4d5b66" font-weight="700">Region</text>
+      <rect x="118" y="179" width="116" height="36" rx="8" fill="#fff" stroke="#c4d1dc"/>
+      <text x="145" y="202" fill="#192936">us</text>
+      <text x="262" y="202" fill="#4d5b66" font-weight="700">Locale</text>
+      <rect x="338" y="179" width="126" height="36" rx="8" fill="#fff" stroke="#c4d1dc"/>
+      <text x="365" y="202" fill="#192936">enUS</text>
+    </g>
+    <g font-family="Inter, Segoe UI, sans-serif" font-size="15" font-weight="800">
+      <rect x="44" y="236" width="148" height="42" rx="9" fill="#2f6f73"/>
+      <text x="118" y="262" text-anchor="middle" fill="#ffffff">Install / Update</text>
+      <rect x="204" y="236" width="96" height="42" rx="9" fill="#ffffff" stroke="#c4d1dc"/>
+      <text x="252" y="262" text-anchor="middle" fill="#1f2d3a">Login</text>
+      <rect x="312" y="236" width="88" height="42" rx="9" fill="#2f6f73"/>
+      <text x="356" y="262" text-anchor="middle" fill="#ffffff">Play</text>
+      <rect x="412" y="236" width="98" height="42" rx="9" fill="#ffffff" stroke="#c4d1dc"/>
+      <text x="461" y="262" text-anchor="middle" fill="#1f2d3a">Refresh</text>
+    </g>
+  </g>
+  <g transform="translate(145 505)" font-family="Inter, Segoe UI, sans-serif" font-size="15" font-weight="700">
+    <rect x="0" y="-26" width="162" height="38" rx="19" fill="#ffffff" opacity="0.9"/>
+    <text x="81" y="-2" text-anchor="middle" fill="#19424a">No Python/Bash</text>
+    <rect x="184" y="-26" width="156" height="38" rx="19" fill="#ffffff" opacity="0.9"/>
+    <text x="262" y="-2" text-anchor="middle" fill="#19424a">AppImage ready</text>
+    <rect x="362" y="-26" width="164" height="38" rx="19" fill="#ffffff" opacity="0.9"/>
+    <text x="444" y="-2" text-anchor="middle" fill="#19424a">Resumable downloads</text>
+    <rect x="548" y="-26" width="162" height="38" rx="19" fill="#ffffff" opacity="0.9"/>
+    <text x="629" y="-2" text-anchor="middle" fill="#19424a">NixOS friendly</text>
+    <rect x="732" y="-26" width="176" height="38" rx="19" fill="#ffffff" opacity="0.9"/>
+    <text x="820" y="-2" text-anchor="middle" fill="#19424a">GTK4 desktop app</text>
+  </g>
+</svg>

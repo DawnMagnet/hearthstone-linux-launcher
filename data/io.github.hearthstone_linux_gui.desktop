@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=hearthstone-linux-gui
+Exec=hearthstone-linux-gui %u
+Icon=io.github.hearthstone_linux_gui
+Categories=Game;
+MimeType=x-scheme-handler/wtcg;x-scheme-handler/blizzard-hearthstone;x-scheme-handler/hearthstone-linux;x-scheme-handler/hearthstone-linux-gui;
+StartupNotify=true

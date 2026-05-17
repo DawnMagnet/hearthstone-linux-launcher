@@ -1,9 +1,13 @@
 [package]
-name = "hearthstone-linux"
-version = "0.1.0"
+name = "hearthstone-linux-gui"
+version = "0.1.1"
 edition = "2021"
 license = "MIT"
-description = "Native Linux manager for crafting and launching Hearthstone"
+description = "Native GTK4 Linux GUI manager for crafting and launching Hearthstone"
+
+[lib]
+name = "hearthstone_linux"
+path = "src/lib.rs"
 
 [workspace]
 members = [

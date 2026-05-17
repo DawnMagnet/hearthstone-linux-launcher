@@ -5,7 +5,7 @@ use clap::Parser;
 mod ui;
 
 #[derive(Debug, Parser)]
-#[command(name = "hearthstone-linux")]
+#[command(name = "hearthstone-linux-gui")]
 #[command(about = "Native Linux manager for Hearthstone")]
 struct Args {
     /// Battle.net browser callback URI.
@@ -121,7 +121,7 @@ fn main() -> Result<()> {
 
     if args.no_gui {
         tracing::info!("no-gui smoke check");
-        println!("hearthstone-linux core is available");
+        println!("hearthstone-linux-gui core is available");
         return Ok(());
     }
 

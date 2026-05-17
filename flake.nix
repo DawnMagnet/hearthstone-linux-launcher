@@ -1,5 +1,5 @@
 {
-  description = "Native Rust GTK4/libadwaita Hearthstone Linux manager";
+  description = "Native Rust GTK4/libadwaita hearthstone-linux-gui manager";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -42,10 +42,10 @@
               "target"
             ]);
         };
-        pname = "hearthstone-linux";
-        packageVersion = "0.1.0";
-        appId = "io.github.hearthstone_linux";
-        appImageFile = "Hearthstone_Linux-x86_64.AppImage";
+        pname = "hearthstone-linux-gui";
+        packageVersion = "0.1.1";
+        appId = "io.github.hearthstone_linux_gui";
+        appImageFile = "hearthstone-linux-gui-x86_64.AppImage";
         desktopFile = "${appId}.desktop";
         iconFile = "${appId}.svg";
         x11RuntimeInputs = with pkgs; [
@@ -128,7 +128,7 @@
           ]
           ++ graphicsRuntimeInputs;
         hearthstoneRuntime = pkgs.buildFHSEnv {
-          name = "hearthstone-linux-runtime";
+          name = "hearthstone-linux-gui-runtime";
           targetPkgs = _: fhsRuntimeInputs;
           runScript = "${pkgs.coreutils}/bin/env";
         };
@@ -171,7 +171,7 @@
 
           preFixup = ''
             gappsWrapperArgs+=(
-              --set-default HEARTHSTONE_LINUX_RUNNER "${hearthstoneRuntime}/bin/hearthstone-linux-runtime"
+              --set-default HEARTHSTONE_LINUX_RUNNER "${hearthstoneRuntime}/bin/hearthstone-linux-gui-runtime"
             )
           '';
 
@@ -186,13 +186,13 @@
             install -Dm644 data/${appId}.metainfo.xml \
               $out/share/metainfo/${appId}.metainfo.xml
             install -Dm644 assets/client.config.in \
-              $out/share/hearthstone-linux/client.config.in
+              $out/share/hearthstone-linux-gui/client.config.in
             install -Dm755 "$target_dir/libCoreFoundation.so" \
-              $out/share/hearthstone-linux/stubs/CoreFoundation.so
+              $out/share/hearthstone-linux-gui/stubs/CoreFoundation.so
             install -Dm755 "$target_dir/libOSXWindowManagement.so" \
-              $out/share/hearthstone-linux/stubs/libOSXWindowManagement.so
+              $out/share/hearthstone-linux-gui/stubs/libOSXWindowManagement.so
             install -Dm755 "$target_dir/libblz_commerce_sdk_plugin.so" \
-              $out/share/hearthstone-linux/stubs/libblz_commerce_sdk_plugin.so
+              $out/share/hearthstone-linux-gui/stubs/libblz_commerce_sdk_plugin.so
           '';
         };
         appimageTool = pkgs.appimageTools.extractType2 {
@@ -205,7 +205,7 @@
         };
         portableLibraryPath = pkgs.lib.makeLibraryPath portableRuntimeInputs;
         appDir =
-          pkgs.runCommand "hearthstone-linux-AppDir"
+          pkgs.runCommand "hearthstone-linux-gui-AppDir"
             {
               nativeBuildInputs = with pkgs; [
                 binutils
@@ -220,15 +220,15 @@
               mkdir -p \
                 $out/usr/bin \
                 $out/usr/lib \
-                $out/usr/lib/hearthstone-linux-runtime \
+                $out/usr/lib/hearthstone-linux-gui-runtime \
                 $out/usr/share/applications \
                 $out/usr/share/icons/hicolor/scalable/apps \
                 $out/usr/share/metainfo
 
-              install -Dm755 ${hearthstonePackage}/bin/.hearthstone-linux-wrapped \
-                $out/usr/bin/hearthstone-linux
+              install -Dm755 ${hearthstonePackage}/bin/.hearthstone-linux-gui-wrapped \
+                $out/usr/bin/hearthstone-linux-gui
               cp -a ${hearthstonePackage}/share/. $out/usr/share/
-              install -Dm644 ${./packaging/appimage/io.github.hearthstone_linux.svg} \
+              install -Dm644 ${./packaging/appimage/io.github.hearthstone_linux_gui.svg} \
                 $out/usr/share/icons/hicolor/scalable/apps/${iconFile}
               install -Dm755 ${./packaging/appimage/AppRun} $out/AppRun
 
@@ -299,23 +299,23 @@
               fi
 
               install -Dm755 ${pkgs.glibc.out}/lib/ld-linux-x86-64.so.2 \
-                $out/usr/lib/hearthstone-linux-runtime/ld-linux-x86-64.so.2
+                $out/usr/lib/hearthstone-linux-gui-runtime/ld-linux-x86-64.so.2
               install -Dm755 ${pkgs.patchelf}/bin/patchelf \
-                $out/usr/lib/hearthstone-linux-runtime/patchelf
+                $out/usr/lib/hearthstone-linux-gui-runtime/patchelf
               cat > $out/usr/bin/patchelf <<'EOF'
               #!/usr/bin/env sh
               appdir="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
-              lib_path="$appdir/usr/lib:$appdir/usr/lib/hearthstone-linux-runtime''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-              exec "$appdir/usr/lib/hearthstone-linux-runtime/ld-linux-x86-64.so.2" \
+              lib_path="$appdir/usr/lib:$appdir/usr/lib/hearthstone-linux-gui-runtime''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+              exec "$appdir/usr/lib/hearthstone-linux-gui-runtime/ld-linux-x86-64.so.2" \
                 --library-path "$lib_path" \
-                "$appdir/usr/lib/hearthstone-linux-runtime/patchelf" "$@"
+                "$appdir/usr/lib/hearthstone-linux-gui-runtime/patchelf" "$@"
               EOF
               chmod 755 $out/usr/bin/patchelf
 
-              patchelf --set-rpath '$ORIGIN/../lib:$ORIGIN/../lib/hearthstone-linux-runtime' \
-                $out/usr/bin/hearthstone-linux
-              patchelf --set-rpath '$ORIGIN:$ORIGIN/../../usr/lib:$ORIGIN/../../usr/lib/hearthstone-linux-runtime' \
-                $out/usr/lib/hearthstone-linux-runtime/patchelf
+              patchelf --set-rpath '$ORIGIN/../lib:$ORIGIN/../lib/hearthstone-linux-gui-runtime' \
+                $out/usr/bin/hearthstone-linux-gui
+              patchelf --set-rpath '$ORIGIN:$ORIGIN/../../usr/lib:$ORIGIN/../../usr/lib/hearthstone-linux-gui-runtime' \
+                $out/usr/lib/hearthstone-linux-gui-runtime/patchelf
               find $out/usr/bin $out/usr/lib -type f -executable \
                 -exec strip --strip-unneeded {} + 2>/dev/null || true
             '';
@@ -358,7 +358,7 @@
             '';
         packageFromAppImage =
           packager: extension:
-          pkgs.runCommand "hearthstone-linux-${extension}"
+          pkgs.runCommand "hearthstone-linux-gui-${extension}"
             {
               nativeBuildInputs = with pkgs; [
                 coreutils
@@ -366,40 +366,40 @@
               ];
             }
             ''
-              mkdir -p root/opt/hearthstone-linux root/usr/bin \
+              mkdir -p root/opt/hearthstone-linux-gui root/usr/bin \
                 root/usr/share/applications root/usr/share/icons/hicolor/scalable/apps $out
 
               install -Dm755 ${appImage}/${appImageFile} \
-                root/opt/hearthstone-linux/${appImageFile}
-              install -Dm644 ${./data/io.github.hearthstone_linux.desktop} \
+                root/opt/hearthstone-linux-gui/${appImageFile}
+              install -Dm644 ${./data/io.github.hearthstone_linux_gui.desktop} \
                 root/usr/share/applications/${desktopFile}
-              install -Dm644 ${./packaging/appimage/io.github.hearthstone_linux.svg} \
+              install -Dm644 ${./packaging/appimage/io.github.hearthstone_linux_gui.svg} \
                 root/usr/share/icons/hicolor/scalable/apps/${iconFile}
 
-              cat > root/usr/bin/hearthstone-linux <<'EOF'
+              cat > root/usr/bin/hearthstone-linux-gui <<'EOF'
               #!/usr/bin/env sh
               export APPIMAGE_EXTRACT_AND_RUN="''${APPIMAGE_EXTRACT_AND_RUN:-1}"
-              exec /opt/hearthstone-linux/${appImageFile} "$@"
+              exec /opt/hearthstone-linux-gui/${appImageFile} "$@"
               EOF
-              chmod 755 root/usr/bin/hearthstone-linux
+              chmod 755 root/usr/bin/hearthstone-linux-gui
 
               cat > nfpm.yaml <<EOF
-              name: hearthstone-linux
+              name: hearthstone-linux-gui
               arch: amd64
               platform: linux
               version: "${packageVersion}"
               section: games
               priority: optional
-              maintainer: Hearthstone Linux contributors
-              description: Native Linux manager for installing, logging into, and launching Hearthstone.
+              maintainer: hearthstone-linux-gui contributors
+              description: Native GTK4 Linux GUI manager for installing, logging into, and launching Hearthstone.
               license: MIT
               contents:
-                - src: $(pwd)/root/opt/hearthstone-linux/${appImageFile}
-                  dst: /opt/hearthstone-linux/${appImageFile}
+                - src: $(pwd)/root/opt/hearthstone-linux-gui/${appImageFile}
+                  dst: /opt/hearthstone-linux-gui/${appImageFile}
                   file_info:
                     mode: 0755
-                - src: $(pwd)/root/usr/bin/hearthstone-linux
-                  dst: /usr/bin/hearthstone-linux
+                - src: $(pwd)/root/usr/bin/hearthstone-linux-gui
+                  dst: /usr/bin/hearthstone-linux-gui
                   file_info:
                     mode: 0755
                 - src: $(pwd)/root/usr/share/applications/${desktopFile}
@@ -421,21 +421,21 @@
         packages.AppImage = appImage;
         packages.Deb = debPackage;
         packages.Rpm = rpmPackage;
-        packages.AllDist = pkgs.runCommand "hearthstone-linux-AllDist" { } ''
+        packages.AllDist = pkgs.runCommand "hearthstone-linux-gui-AllDist" { } ''
           mkdir -p $out/nix $out/appimage $out/deb $out/rpm
-          ln -s ${hearthstonePackage} $out/nix/hearthstone-linux
-          ln -s ${hearthstoneRuntime} $out/nix/hearthstone-linux-runtime
+          ln -s ${hearthstonePackage} $out/nix/hearthstone-linux-gui
+          ln -s ${hearthstoneRuntime} $out/nix/hearthstone-linux-gui-runtime
           cp ${appImage}/${appImageFile} $out/appimage/
           cp ${debPackage}/*.deb $out/deb/
           cp ${rpmPackage}/*.rpm $out/rpm/
           cat > $out/README.txt <<EOF
-          Hearthstone Linux distribution artifacts
+          hearthstone-linux-gui distribution artifacts
 
-          nix/hearthstone-linux          Native Nix package output
-          nix/hearthstone-linux-runtime  Nix runtime wrapper for the Unity player
-          appimage/*.AppImage            Portable x86_64 AppImage
-          deb/*.deb                      Debian package that installs the AppImage payload
-          rpm/*.rpm                      RPM package that installs the AppImage payload
+          nix/hearthstone-linux-gui          Native Nix package output
+          nix/hearthstone-linux-gui-runtime  Nix runtime wrapper for the Unity player
+          appimage/*.AppImage                Portable x86_64 AppImage
+          deb/*.deb                          Debian package that installs the AppImage payload
+          rpm/*.rpm                          RPM package that installs the AppImage payload
           EOF
         '';
 
@@ -446,7 +446,7 @@
             hearthstoneRuntime
             rust-analyzer
           ];
-          HEARTHSTONE_LINUX_RUNNER = "${hearthstoneRuntime}/bin/hearthstone-linux-runtime";
+          HEARTHSTONE_LINUX_RUNNER = "${hearthstoneRuntime}/bin/hearthstone-linux-gui-runtime";
           RUST_BACKTRACE = "1";
         };
 

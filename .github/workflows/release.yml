@@ -97,7 +97,7 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo "## Hearthstone Linux artifacts"
+            echo "## hearthstone-linux-gui artifacts"
             echo
             echo "| File | Size |"
             echo "| --- | ---: |"
@@ -110,7 +110,7 @@ jobs:
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4
         with:
-          name: hearthstone-linux-${{ steps.names.outputs.artifact_suffix }}-appimage
+          name: hearthstone-linux-gui-${{ steps.names.outputs.artifact_suffix }}-appimage
           path: release-dist/appimage/*.AppImage
           if-no-files-found: error
           retention-days: 90
@@ -118,7 +118,7 @@ jobs:
       - name: Upload Debian package artifact
         uses: actions/upload-artifact@v4
         with:
-          name: hearthstone-linux-${{ steps.names.outputs.artifact_suffix }}-deb
+          name: hearthstone-linux-gui-${{ steps.names.outputs.artifact_suffix }}-deb
           path: release-dist/deb/*.deb
           if-no-files-found: error
           retention-days: 90
@@ -126,7 +126,7 @@ jobs:
       - name: Upload RPM package artifact
         uses: actions/upload-artifact@v4
         with:
-          name: hearthstone-linux-${{ steps.names.outputs.artifact_suffix }}-rpm
+          name: hearthstone-linux-gui-${{ steps.names.outputs.artifact_suffix }}-rpm
           path: release-dist/rpm/*.rpm
           if-no-files-found: error
           retention-days: 90
@@ -134,7 +134,7 @@ jobs:
       - name: Upload checksums artifact
         uses: actions/upload-artifact@v4
         with:
-          name: hearthstone-linux-${{ steps.names.outputs.artifact_suffix }}-checksums
+          name: hearthstone-linux-gui-${{ steps.names.outputs.artifact_suffix }}-checksums
           path: release-dist/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 90
@@ -142,7 +142,7 @@ jobs:
       - name: Upload complete distribution artifact
         uses: actions/upload-artifact@v4
         with:
-          name: hearthstone-linux-${{ steps.names.outputs.artifact_suffix }}-all-dist
+          name: hearthstone-linux-gui-${{ steps.names.outputs.artifact_suffix }}-all-dist
           path: release-dist/**
           if-no-files-found: error
           retention-days: 90

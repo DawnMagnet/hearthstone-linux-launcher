@@ -871,8 +871,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
-name = "hearthstone-linux"
-version = "0.1.0"
+name = "hearthstone-linux-gui"
+version = "0.1.1"
 dependencies = [
  "aes",
  "anyhow",
@@ -906,16 +906,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "hearthstone-linux-blz-commerce-sdk-plugin-stub"
-version = "0.1.0"
+name = "hearthstone-linux-gui-blz-commerce-sdk-plugin-stub"
+version = "0.1.1"
 
 [[package]]
-name = "hearthstone-linux-core-foundation-stub"
-version = "0.1.0"
+name = "hearthstone-linux-gui-core-foundation-stub"
+version = "0.1.1"
 
 [[package]]
-name = "hearthstone-linux-osx-window-management-stub"
-version = "0.1.0"
+name = "hearthstone-linux-gui-osx-window-management-stub"
+version = "0.1.1"
 
 [[package]]
 name = "heck"

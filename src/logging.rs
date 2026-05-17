@@ -73,6 +73,6 @@ fn mentions_app_filter(filter: &str) -> bool {
 fn file_writer() -> Option<(NonBlocking, WorkerGuard)> {
     let paths = AppPaths::discover().ok()?;
     std::fs::create_dir_all(&paths.log_dir).ok()?;
-    let file = tracing_appender::rolling::daily(paths.log_dir, "hearthstone-linux.log");
+    let file = tracing_appender::rolling::daily(paths.log_dir, "hearthstone-linux-gui.log");
     Some(tracing_appender::non_blocking(file))
 }

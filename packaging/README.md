@@ -24,8 +24,8 @@ nix build .#AllDist
 
 The output contains:
 
-- `nix/hearthstone-linux`: native Nix package output.
-- `nix/hearthstone-linux-runtime`: Nix runtime wrapper for the Unity player.
+- `nix/hearthstone-linux-gui`: native Nix package output.
+- `nix/hearthstone-linux-gui-runtime`: Nix runtime wrapper for the Unity player.
 - `appimage/*.AppImage`: portable x86_64 AppImage.
 - `deb/*.deb`: Debian package that installs the AppImage payload.
 - `rpm/*.rpm`: RPM package that installs the AppImage payload.

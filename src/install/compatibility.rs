@@ -58,14 +58,14 @@ fn resource_dir() -> Result<PathBuf> {
 
     let exe = std::env::current_exe()?;
     if let Some(prefix) = exe.parent().and_then(|bin| bin.parent()) {
-        let share = prefix.join("share/hearthstone-linux");
+        let share = prefix.join("share/hearthstone-linux-gui");
         if share.exists() {
             debug!(path = %share.display(), "using installed resources");
             return Ok(share);
         }
     }
 
-    anyhow::bail!("could not locate hearthstone-linux resources")
+    anyhow::bail!("could not locate hearthstone-linux-gui resources")
 }
 
 fn stub_files() -> Result<StubFiles> {
@@ -87,7 +87,7 @@ fn stub_files() -> Result<StubFiles> {
         return Ok(stubs);
     }
 
-    anyhow::bail!("could not locate hearthstone-linux stub libraries")
+    anyhow::bail!("could not locate hearthstone-linux-gui stub libraries")
 }
 
 fn stub_files_in(dir: PathBuf) -> Result<StubFiles> {

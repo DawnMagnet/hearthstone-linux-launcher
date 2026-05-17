@@ -110,7 +110,7 @@ fn find_runtime_runner() -> Option<PathBuf> {
         }
     }
 
-    find_in_path("hearthstone-linux-runtime")
+    find_in_path("hearthstone-linux-gui-runtime")
 }
 
 fn ensure_bundled_interpreter(exe: &Path) -> Result<()> {

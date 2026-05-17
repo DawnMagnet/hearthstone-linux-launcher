@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<component type="desktop-application">
-  <id>io.github.hearthstone_linux</id>
-  <name>Hearthstone Linux</name>
-  <summary>Native Linux manager for installing, logging into, and launching Hearthstone</summary>
-  <metadata_license>MIT</metadata_license>
-  <project_license>MIT</project_license>
-  <launchable type="desktop-id">io.github.hearthstone_linux.desktop</launchable>
-</component>

@@ -17,8 +17,12 @@ pub struct AppPaths {
 
 impl AppPaths {
     pub fn discover() -> Result<Self> {
-        let dirs = ProjectDirs::from("io.github", "hearthstone-linux", "Hearthstone Linux")
-            .context("could not resolve XDG project directories")?;
+        let dirs = ProjectDirs::from(
+            "io.github",
+            "hearthstone-linux-gui",
+            "hearthstone-linux-gui",
+        )
+        .context("could not resolve XDG project directories")?;
         let config_dir = dirs.config_dir().to_path_buf();
         let data_dir = dirs.data_dir().to_path_buf();
         let cache_dir = dirs.cache_dir().to_path_buf();

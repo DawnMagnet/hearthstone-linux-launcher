@@ -26,7 +26,7 @@ use std::{
 pub fn run() {
     tracing::debug!("creating GTK application");
     let app = adw::Application::builder()
-        .application_id("io.github.hearthstone_linux")
+        .application_id("io.github.hearthstone_linux_gui")
         .flags(gio::ApplicationFlags::HANDLES_OPEN)
         .build();
     app.connect_startup(|_| configure_color_scheme());
@@ -79,7 +79,7 @@ fn build_window(app: &adw::Application) {
         AppConfig::load_or_default(&paths.config_file).unwrap_or_default(),
     ));
 
-    let title = adw::WindowTitle::new("Hearthstone Linux", "");
+    let title = adw::WindowTitle::new("hearthstone-linux-gui", "");
     let header = adw::HeaderBar::builder().title_widget(&title).build();
 
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -144,7 +144,7 @@ fn build_window(app: &adw::Application) {
 
     let window = adw::ApplicationWindow::builder()
         .application(app)
-        .title("Hearthstone Linux")
+        .title("hearthstone-linux-gui")
         .default_width(620)
         .default_height(360)
         .content(&root)
@@ -607,7 +607,7 @@ fn ensure_auth_scheme_handlers() -> std::io::Result<()> {
     };
     std::fs::create_dir_all(&applications_dir)?;
 
-    let desktop_id = "io.github.hearthstone_linux.desktop";
+    let desktop_id = "io.github.hearthstone_linux_gui.desktop";
     let desktop_file = applications_dir.join(desktop_id);
     std::fs::write(&desktop_file, user_desktop_entry(&exe))?;
 
@@ -618,6 +618,7 @@ fn ensure_auth_scheme_handlers() -> std::io::Result<()> {
         "x-scheme-handler/wtcg",
         "x-scheme-handler/blizzard-hearthstone",
         "x-scheme-handler/hearthstone-linux",
+        "x-scheme-handler/hearthstone-linux-gui",
     ] {
         let _ = std::process::Command::new("xdg-mime")
             .args(["default", desktop_id, mime])
@@ -629,7 +630,7 @@ fn ensure_auth_scheme_handlers() -> std::io::Result<()> {
 
 fn user_desktop_entry(exe: &Path) -> String {
     format!(
-        "[Desktop Entry]\nType=Application\nName=Hearthstone Linux\nExec={} %u\nIcon=io.github.hearthstone_linux\nCategories=Game;\nMimeType=x-scheme-handler/wtcg;x-scheme-handler/blizzard-hearthstone;x-scheme-handler/hearthstone-linux;\nStartupNotify=true\n",
+        "[Desktop Entry]\nType=Application\nName=hearthstone-linux-gui\nExec={} %u\nIcon=io.github.hearthstone_linux_gui\nCategories=Game;\nMimeType=x-scheme-handler/wtcg;x-scheme-handler/blizzard-hearthstone;x-scheme-handler/hearthstone-linux;x-scheme-handler/hearthstone-linux-gui;\nStartupNotify=true\n",
         shell_quote_path(exe)
     )
 }
