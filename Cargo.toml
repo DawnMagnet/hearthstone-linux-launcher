@@ -1,6 +1,6 @@
 [package]
 name = "hearthstone-linux-gui"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 license = "MIT"
 description = "Native GTK4 Linux GUI manager for crafting and launching Hearthstone"
