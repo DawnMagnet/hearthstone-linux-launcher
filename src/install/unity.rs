@@ -1,23 +1,23 @@
+use crate::download::{self, DownloadProgress};
 use anyhow::{Context, Result};
-use reqwest::{
-    header::{CONTENT_LENGTH, CONTENT_RANGE, RANGE},
-    StatusCode,
-};
 use serde_json::json;
 use std::{
     fs::File,
-    path::{Path, PathBuf},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
+    io::{Read, Result as IoResult},
+    path::Path,
+    sync::{atomic::AtomicBool, Arc},
     time::{Duration, Instant},
 };
-use tokio::io::AsyncWriteExt;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 const UNITY_ENGINE: &str =
     "Editor/Data/PlaybackEngines/LinuxStandaloneSupport/Variations/linux64_player_nondevelopment_mono";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UnityProgressPhase {
+    Downloading,
+    Extracting,
+}
 
 pub async fn ensure_unity_player(game_dir: &Path, cache_dir: &Path) -> Result<String> {
     ensure_unity_player_with_progress(game_dir, cache_dir, None, |_| {}).await
@@ -29,6 +29,7 @@ pub struct UnityDownloadProgress {
     pub total: Option<u64>,
     pub speed_bytes_per_second: f64,
     pub resumed: bool,
+    pub phase: UnityProgressPhase,
 }
 
 impl UnityDownloadProgress {
@@ -37,7 +38,11 @@ impl UnityDownloadProgress {
         if total == 0 {
             return None;
         }
-        Some((self.downloaded as f64 / total as f64).clamp(0.0, 1.0))
+        let phase_fraction = (self.downloaded as f64 / total as f64).clamp(0.0, 1.0);
+        Some(match self.phase {
+            UnityProgressPhase::Downloading => phase_fraction * 0.9,
+            UnityProgressPhase::Extracting => 0.9 + phase_fraction * 0.1,
+        })
     }
 }
 
@@ -119,206 +124,28 @@ async fn download_unity(
         archive = %archive_path.display(),
         "downloading Unity archive"
     );
-    download_file_resumable(&url, &archive_path, cancel, progress).await?;
-    debug!(archive = %archive_path.display(), "extracting Unity archive");
-    extract_unity_archive(&archive_path, &cache_dir.join(version))?;
-    Ok(())
-}
-
-async fn download_file_resumable(
-    url: &str,
-    destination: &Path,
-    cancel: Option<&Arc<AtomicBool>>,
-    progress: &mut (impl FnMut(UnityDownloadProgress) + Send),
-) -> Result<()> {
-    check_cancelled(cancel)?;
-    if destination.exists() {
-        let downloaded = tokio::fs::metadata(destination).await?.len();
-        progress(UnityDownloadProgress {
-            downloaded,
-            total: Some(downloaded),
-            speed_bytes_per_second: 0.0,
-            resumed: false,
-        });
-        return Ok(());
-    }
-
-    let partial = partial_download_path(destination);
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(30))
         .build()?;
-    let expected_total = fetch_content_length(&client, url).await.unwrap_or(None);
-    let mut offset = file_len(&partial).await?;
-    if let Some(total) = expected_total {
-        if offset == total {
-            tokio::fs::rename(&partial, destination).await?;
-            progress(UnityDownloadProgress {
-                downloaded: total,
-                total: Some(total),
-                speed_bytes_per_second: 0.0,
-                resumed: true,
-            });
-            return Ok(());
-        }
-        if offset > total {
-            warn!(
-                partial = %partial.display(),
-                partial_bytes = offset,
-                total_bytes = total,
-                "partial Unity archive is larger than remote file; restarting download"
-            );
-            let _ = tokio::fs::remove_file(&partial).await;
-            offset = 0;
-        }
-    }
-
-    for _ in 1..=2 {
-        check_cancelled(cancel)?;
-        let mut request = client.get(url);
-        if offset > 0 {
-            request = request.header(RANGE, format!("bytes={offset}-"));
-        }
-
-        let response = request.send().await?;
-        let status = response.status();
-        if status == StatusCode::RANGE_NOT_SATISFIABLE && offset > 0 {
-            warn!(
-                partial = %partial.display(),
-                offset = offset,
-                "remote rejected resume range; restarting Unity download"
-            );
-            let _ = tokio::fs::remove_file(&partial).await;
-            offset = 0;
-            continue;
-        }
-
-        let response = response.error_for_status()?;
-        let status = response.status();
-        let append = status == StatusCode::PARTIAL_CONTENT && offset > 0;
-        if offset > 0 && !append {
-            warn!("Unity download server ignored range request; restarting download");
-            offset = 0;
-        }
-
-        let total = if append {
-            content_range_total(response.headers())
-                .or_else(|| {
-                    response
-                        .content_length()
-                        .map(|remaining| offset + remaining)
-                })
-                .or(expected_total)
-        } else {
-            response.content_length().or(expected_total)
-        };
-        let mut downloaded = if append { offset } else { 0 };
-        let mut file = tokio::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .append(append)
-            .truncate(!append)
-            .open(&partial)
-            .await?;
-        let resumed = append;
-        progress(UnityDownloadProgress {
-            downloaded,
-            total,
-            speed_bytes_per_second: 0.0,
-            resumed,
-        });
-
-        let mut response = response;
-        let mut window_start = Instant::now();
-        let mut window_bytes = 0u64;
-        let idle_timeout = Duration::from_secs(30);
-        loop {
-            check_cancelled(cancel)?;
-            match tokio::time::timeout(idle_timeout, response.chunk()).await {
-                Ok(Ok(Some(chunk))) => {
-                    file.write_all(&chunk).await?;
-                    let chunk_len = chunk.len() as u64;
-                    downloaded += chunk_len;
-                    window_bytes += chunk_len;
-                    let elapsed = window_start.elapsed();
-                    if elapsed >= Duration::from_millis(500) {
-                        progress(UnityDownloadProgress {
-                            downloaded,
-                            total,
-                            speed_bytes_per_second: window_bytes as f64 / elapsed.as_secs_f64(),
-                            resumed,
-                        });
-                        window_start = Instant::now();
-                        window_bytes = 0;
-                    }
-                }
-                Ok(Ok(None)) => break,
-                Ok(Err(error)) => return Err(error.into()),
-                Err(_) => anyhow::bail!(
-                    "Unity download stalled, no data received for {}s",
-                    idle_timeout.as_secs()
-                ),
-            }
-        }
-        file.flush().await?;
-
-        if let Some(total) = total {
-            anyhow::ensure!(
-                downloaded >= total,
-                "Unity archive download was incomplete: got {downloaded} of {total} bytes"
-            );
-        }
-        tokio::fs::rename(&partial, destination).await?;
-        progress(UnityDownloadProgress {
-            downloaded,
-            total: total.or(Some(downloaded)),
-            speed_bytes_per_second: 0.0,
-            resumed,
-        });
-        return Ok(());
-    }
-
-    anyhow::bail!("failed to resume Unity download after retrying from the beginning")
-}
-
-async fn fetch_content_length(client: &reqwest::Client, url: &str) -> Result<Option<u64>> {
-    let response = client.head(url).send().await?.error_for_status()?;
-    Ok(response
-        .headers()
-        .get(CONTENT_LENGTH)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse().ok()))
-}
-
-async fn file_len(path: &Path) -> Result<u64> {
-    match tokio::fs::metadata(path).await {
-        Ok(metadata) => Ok(metadata.len()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0),
-        Err(error) => Err(error.into()),
-    }
-}
-
-fn content_range_total(headers: &reqwest::header::HeaderMap) -> Option<u64> {
-    let value = headers.get(CONTENT_RANGE)?.to_str().ok()?;
-    value.rsplit('/').next()?.parse().ok()
-}
-
-fn partial_download_path(destination: &Path) -> PathBuf {
-    let mut partial = destination.to_path_buf();
-    let extension = destination
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(|extension| format!("{extension}.part"))
-        .unwrap_or_else(|| "part".to_string());
-    partial.set_extension(extension);
-    partial
-}
-
-fn check_cancelled(cancel: Option<&Arc<AtomicBool>>) -> Result<()> {
-    if cancel.is_some_and(|cancel| cancel.load(Ordering::Relaxed)) {
-        warn!("Unity download cancelled");
-        anyhow::bail!("installation cancelled");
-    }
+    download::download_file(&client, &url, &archive_path, cancel.cloned(), |update| {
+        progress(UnityDownloadProgress::from(update));
+    })
+    .await?;
+    debug!(archive = %archive_path.display(), "extracting Unity archive");
+    extract_unity_archive_with_progress(&archive_path, &cache_dir.join(version), progress)?;
     Ok(())
+}
+
+impl From<DownloadProgress> for UnityDownloadProgress {
+    fn from(progress: DownloadProgress) -> Self {
+        Self {
+            downloaded: progress.downloaded,
+            total: progress.total,
+            speed_bytes_per_second: progress.speed_bytes_per_second,
+            resumed: progress.resumed,
+            phase: UnityProgressPhase::Downloading,
+        }
+    }
 }
 
 async fn fetch_unity_archive_hash(version: &str) -> Result<String> {
@@ -352,10 +179,23 @@ async fn fetch_unity_archive_hash(version: &str) -> Result<String> {
     Ok(hash)
 }
 
-fn extract_unity_archive(archive_path: &Path, destination: &Path) -> Result<()> {
+fn extract_unity_archive_with_progress(
+    archive_path: &Path,
+    destination: &Path,
+    progress: &mut (impl FnMut(UnityDownloadProgress) + Send),
+) -> Result<()> {
     std::fs::create_dir_all(destination)?;
     let file = File::open(archive_path)?;
-    let decoder = xz2::read::XzDecoder::new(file);
+    let total = file.metadata().ok().map(|metadata| metadata.len());
+    progress(UnityDownloadProgress {
+        downloaded: 0,
+        total,
+        speed_bytes_per_second: 0.0,
+        resumed: false,
+        phase: UnityProgressPhase::Extracting,
+    });
+    let reader = ProgressReader::new(file, total, progress);
+    let decoder = xz2::read::XzDecoder::new(reader);
     let mut archive = tar::Archive::new(decoder);
 
     for entry in archive.entries()? {
@@ -369,7 +209,80 @@ fn extract_unity_archive(archive_path: &Path, destination: &Path) -> Result<()> 
             entry.unpack(target)?;
         }
     }
+    if let Some(total) = total {
+        progress(UnityDownloadProgress {
+            downloaded: total,
+            total: Some(total),
+            speed_bytes_per_second: 0.0,
+            resumed: false,
+            phase: UnityProgressPhase::Extracting,
+        });
+    }
     Ok(())
+}
+
+struct ProgressReader<'a, R, F>
+where
+    F: FnMut(UnityDownloadProgress) + Send,
+{
+    inner: R,
+    total: Option<u64>,
+    progress: &'a mut F,
+    read: u64,
+    window_read: u64,
+    window_start: Instant,
+    last_emit: Instant,
+}
+
+impl<'a, R, F> ProgressReader<'a, R, F>
+where
+    F: FnMut(UnityDownloadProgress) + Send,
+{
+    fn new(inner: R, total: Option<u64>, progress: &'a mut F) -> Self {
+        let now = Instant::now();
+        Self {
+            inner,
+            total,
+            progress,
+            read: 0,
+            window_read: 0,
+            window_start: now,
+            last_emit: now,
+        }
+    }
+}
+
+impl<R, F> Read for ProgressReader<'_, R, F>
+where
+    R: Read,
+    F: FnMut(UnityDownloadProgress) + Send,
+{
+    fn read(&mut self, buffer: &mut [u8]) -> IoResult<usize> {
+        let read = self.inner.read(buffer)?;
+        if read == 0 {
+            return Ok(0);
+        }
+
+        let read = read as u64;
+        self.read = self.read.saturating_add(read);
+        self.window_read = self.window_read.saturating_add(read);
+        let elapsed_since_emit = self.last_emit.elapsed();
+        if elapsed_since_emit >= Duration::from_millis(500) {
+            let elapsed = self.window_start.elapsed().as_secs_f64().max(0.001);
+            (self.progress)(UnityDownloadProgress {
+                downloaded: self.read,
+                total: self.total,
+                speed_bytes_per_second: self.window_read as f64 / elapsed,
+                resumed: false,
+                phase: UnityProgressPhase::Extracting,
+            });
+            self.window_read = 0;
+            self.window_start = Instant::now();
+            self.last_emit = Instant::now();
+        }
+
+        Ok(read as usize)
+    }
 }
 
 fn should_extract(path: &Path) -> bool {

@@ -164,10 +164,10 @@ fn preserve_login_metadata(config: &mut AppConfig, paths: &AppPaths) {
 }
 
 fn format_unity_download_progress(progress: &unity::UnityDownloadProgress) -> String {
-    let action = if progress.resumed {
-        "Resuming Unity download"
-    } else {
-        "Downloading Unity"
+    let action = match progress.phase {
+        unity::UnityProgressPhase::Downloading if progress.resumed => "Resuming Unity download",
+        unity::UnityProgressPhase::Downloading => "Downloading Unity",
+        unity::UnityProgressPhase::Extracting => "Extracting Unity",
     };
     let downloaded = format_bytes(progress.downloaded as f64);
     let speed = if progress.speed_bytes_per_second > 0.0 {

@@ -1,4 +1,5 @@
 use super::{partition_hash, verify_md5};
+use crate::download;
 use anyhow::{Context, Result};
 use std::{
     io::{ErrorKind, SeekFrom},
@@ -21,6 +22,7 @@ pub struct RemoteCdn {
     config_base: String,
     cache_dir: Option<PathBuf>,
     cancel: Option<Arc<AtomicBool>>,
+    progress: Option<Arc<dyn Fn(u64) + Send + Sync>>,
     last_transfer: Arc<Mutex<Option<TransferStats>>>,
 }
 
@@ -48,6 +50,7 @@ impl RemoteCdn {
             config_base: "/tpr/configs/data".to_string(),
             cache_dir: None,
             cancel: None,
+            progress: None,
             last_transfer: Arc::new(Mutex::new(None)),
         })
     }
@@ -59,6 +62,11 @@ impl RemoteCdn {
 
     pub fn with_cancel_token(mut self, cancel: Arc<AtomicBool>) -> Self {
         self.cancel = Some(cancel);
+        self
+    }
+
+    pub fn with_progress_callback(mut self, progress: Arc<dyn Fn(u64) + Send + Sync>) -> Self {
+        self.progress = Some(progress);
         self
     }
 
@@ -113,12 +121,65 @@ impl RemoteCdn {
             return Ok(data);
         }
 
-        let data = self.fetch_data(key, false).await?;
-        let end = offset
-            .checked_add(size)
-            .context("requested CDN data range overflows")?;
-        anyhow::ensure!(end <= data.len(), "CDN data range exceeds file size");
-        Ok(data[offset..end].to_vec())
+        let path = format!("/data/{}", partition_hash(key)?);
+        let data = match self
+            .fetch_joined_range(&self.data_base, &path, offset, size)
+            .await
+        {
+            Ok(data) => data,
+            Err(error) => {
+                warn!(
+                    namespace = "data",
+                    key = %key,
+                    offset = offset,
+                    bytes = size,
+                    error = %format!("{error:#}"),
+                    "CDN range fetch failed; falling back to full file"
+                );
+                let data = self.fetch_data(key, false).await?;
+                let end = offset
+                    .checked_add(size)
+                    .context("requested CDN data range overflows")?;
+                anyhow::ensure!(end <= data.len(), "CDN data range exceeds file size");
+                data[offset..end].to_vec()
+            }
+        };
+        Ok(data)
+    }
+
+    async fn fetch_joined_range(
+        &self,
+        base: &str,
+        path: &str,
+        offset: usize,
+        size: usize,
+    ) -> Result<Vec<u8>> {
+        let mut url = self.server.clone();
+        url.set_path(&format!(
+            "{}/{}",
+            base.trim_matches('/'),
+            path.trim_start_matches('/')
+        ));
+
+        let offset_u64 = u64::try_from(offset).context("range offset is too large")?;
+        let size_u64 = u64::try_from(size).context("range size is too large")?;
+        let start = Instant::now();
+        let data = download::download_range_to_vec(
+            &self.http,
+            url.clone(),
+            offset_u64,
+            size_u64,
+            self.cancel.clone(),
+            self.progress.clone(),
+        )
+        .await?;
+        debug!(url = %url, offset = offset, bytes = data.len(), elapsed_ms = start.elapsed().as_millis(), "fetched CDN URL range");
+        self.record_transfer(TransferStats {
+            bytes: data.len(),
+            elapsed: start.elapsed(),
+            from_cache: false,
+        });
+        Ok(data)
     }
 
     pub async fn fetch_data_optional(&self, key: &str, verify: bool) -> Result<Option<Vec<u8>>> {
@@ -254,30 +315,21 @@ impl RemoteCdn {
 
     async fn fetch_url_optional(&self, url: Url) -> Result<Option<Vec<u8>>> {
         self.check_cancelled()?;
-        let response = self.http.get(url.clone()).send().await?;
-        self.check_cancelled()?;
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Ok(None);
-        }
-        let mut response = response.error_for_status()?;
-        let start = Instant::now();
-        let mut data = Vec::new();
-        let idle_timeout = Duration::from_secs(30);
-        loop {
+        if let Ok(response) = self.http.head(url.clone()).send().await {
             self.check_cancelled()?;
-            match tokio::time::timeout(idle_timeout, response.chunk()).await {
-                Ok(Ok(Some(chunk))) => {
-                    trace!(url = %url, chunk_bytes = chunk.len(), downloaded_bytes = data.len() + chunk.len(), "received CDN chunk");
-                    data.extend_from_slice(&chunk);
-                }
-                Ok(Ok(None)) => break,
-                Ok(Err(error)) => return Err(error.into()),
-                Err(_) => anyhow::bail!(
-                    "connection stalled, no data received for {}s",
-                    idle_timeout.as_secs()
-                ),
+            if response.status() == reqwest::StatusCode::NOT_FOUND {
+                return Ok(None);
             }
+            response.error_for_status_ref()?;
         }
+        let start = Instant::now();
+        let data = download::download_to_vec(
+            &self.http,
+            url.clone(),
+            self.cancel.clone(),
+            self.progress.clone(),
+        )
+        .await?;
         self.check_cancelled()?;
         debug!(url = %url, bytes = data.len(), elapsed_ms = start.elapsed().as_millis(), "fetched CDN URL");
         self.record_transfer(TransferStats {
