@@ -13,18 +13,22 @@ use cdn::RemoteCdn;
 use configfile::{BuildConfig, CdnConfig};
 use encoding::EncodingFile;
 use installfile::{InstallEntry, InstallFile};
+use serde::{Deserialize, Serialize};
 use std::{
-    path::{Path, PathBuf},
+    collections::{HashMap, HashSet},
+    fs::Metadata,
+    path::{Component, Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::{Duration, Instant},
+    time::{Duration, Instant, UNIX_EPOCH},
 };
 use tokio::{sync::mpsc, task::JoinSet};
 use tracing::{debug, info, trace, warn};
 
 const INSTALL_FILE_CONCURRENCY: usize = 8;
+const INSTALLED_MANIFEST_NAME: &str = ".ngdp-installed.json";
 
 #[derive(Clone, Debug)]
 pub struct VersionInfo {
@@ -67,7 +71,49 @@ pub struct NgdpClient {
 struct InstallWorkItem {
     entry: InstallEntry,
     encoding_key: String,
+    target_path: String,
     has_archive: bool,
+}
+
+#[derive(Clone, Debug)]
+struct PendingInstallItem {
+    entry: InstallEntry,
+    encoding_key: String,
+    target_path: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct InstalledManifest {
+    version_name: String,
+    build_id: String,
+    region: String,
+    locale: String,
+    files: HashMap<String, InstalledFileRecord>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct InstalledFileRecord {
+    content_key: String,
+    encoding_key: String,
+    size: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    modified_ns: Option<u64>,
+    verified: bool,
+}
+
+#[derive(Clone, Debug)]
+struct LocalInstallScan {
+    missing: Vec<PendingInstallItem>,
+    records: HashMap<String, InstalledFileRecord>,
+    fast_hits: usize,
+    verified_hits: usize,
+}
+
+#[derive(Clone, Debug)]
+struct InstalledEntryResult {
+    bytes: u64,
+    target_path: String,
+    record: InstalledFileRecord,
 }
 
 impl Default for NgdpClient {
@@ -257,40 +303,104 @@ impl NgdpClient {
             "filtered install manifest"
         );
         progress(ProgressUpdate::new(
-            format!("Installing {} files", entries.len()),
+            format!("Checking {} local files", entries.len()),
             0.22,
         ));
 
+        let previous_manifest = InstalledManifest::load(out_dir).await?;
+        let mut pending = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let encoding_key = encoding
+                .find_by_content_key(&entry.content_key)
+                .with_context(|| format!("encoding key not found for {}", entry.path))?;
+            let Some(target_path) = installed_target_path(&entry.path) else {
+                trace!(
+                    path = %entry.path,
+                    content_key = %entry.content_key,
+                    encoding_key,
+                    "skipping macOS-only install entry"
+                );
+                continue;
+            };
+            trace!(
+                path = %entry.path,
+                target_path = %target_path,
+                content_key = %entry.content_key,
+                encoding_key,
+                "resolved install entry encoding key"
+            );
+            pending.push(PendingInstallItem {
+                encoding_key: encoding_key.to_string(),
+                target_path,
+                entry,
+            });
+        }
+
+        let mut install_scan = scan_local_install(
+            out_dir,
+            pending,
+            &previous_manifest,
+            options.verify,
+            cancel.as_ref(),
+        )
+        .await?;
+        info!(
+            fast_hits = install_scan.fast_hits,
+            verified_hits = install_scan.verified_hits,
+            missing = install_scan.missing.len(),
+            "checked local install files"
+        );
+
+        if install_scan.missing.is_empty() {
+            progress(ProgressUpdate::new(
+                "All Hearthstone files are already present",
+                0.95,
+            ));
+            let desired_paths = install_scan.records.keys().cloned().collect::<HashSet<_>>();
+            InstalledManifest::for_version(&version, options, install_scan.records)
+                .save(out_dir)
+                .await?;
+            cleanup_stale_installed_files(out_dir, &previous_manifest, &desired_paths).await?;
+            return Ok(version);
+        }
+
+        progress(ProgressUpdate::new(
+            format!("Downloading {} changed files", install_scan.missing.len()),
+            0.24,
+        ));
         let archive_map =
             archive::ArchiveMap::load(&cdn, &cdn_config, options.verify, |message, fraction| {
                 progress(ProgressUpdate::new(
                     message,
-                    fraction.map(|value| 0.22 + value * 0.13),
+                    fraction.map(|value| 0.24 + value * 0.11),
                 ))
             })
             .await?;
         check_cancelled(cancel.as_ref())?;
 
-        let mut work = Vec::with_capacity(entries.len());
-        for entry in entries {
-            let encoding_key = encoding
-                .find_by_content_key(&entry.content_key)
-                .with_context(|| format!("encoding key not found for {}", entry.path))?;
-            trace!(
-                path = %entry.path,
-                content_key = %entry.content_key,
-                encoding_key,
-                in_archive = archive_map.contains(encoding_key),
-                "resolved install entry encoding key"
-            );
-            work.push(InstallWorkItem {
-                has_archive: archive_map.contains(encoding_key),
-                encoding_key: encoding_key.to_string(),
-                entry,
-            });
-        }
+        let work = install_scan
+            .missing
+            .into_iter()
+            .map(|item| {
+                let has_archive = archive_map.contains(&item.encoding_key);
+                trace!(
+                    path = %item.entry.path,
+                    target_path = %item.target_path,
+                    content_key = %item.entry.content_key,
+                    encoding_key = %item.encoding_key,
+                    in_archive = has_archive,
+                    "queued install entry"
+                );
+                InstallWorkItem {
+                    has_archive,
+                    encoding_key: item.encoding_key,
+                    target_path: item.target_path,
+                    entry: item.entry,
+                }
+            })
+            .collect::<Vec<_>>();
 
-        self.install_entries_parallel(
+        let installed = Self::install_entries_parallel(
             cdn,
             archive_map,
             work,
@@ -300,12 +410,19 @@ impl NgdpClient {
             cancel.clone(),
         )
         .await?;
+        for item in installed {
+            install_scan.records.insert(item.target_path, item.record);
+        }
+        let desired_paths = install_scan.records.keys().cloned().collect::<HashSet<_>>();
+        InstalledManifest::for_version(&version, options, install_scan.records)
+            .save(out_dir)
+            .await?;
+        cleanup_stale_installed_files(out_dir, &previous_manifest, &desired_paths).await?;
 
         Ok(version)
     }
 
     async fn install_entries_parallel(
-        &self,
         cdn: RemoteCdn,
         archive_map: archive::ArchiveMap,
         entries: Vec<InstallWorkItem>,
@@ -313,7 +430,7 @@ impl NgdpClient {
         verify: bool,
         progress: &mut (impl FnMut(ProgressUpdate) + Send),
         cancel: Option<Arc<AtomicBool>>,
-    ) -> Result<()> {
+    ) -> Result<Vec<InstalledEntryResult>> {
         let total_files = entries.len();
         let total_bytes = entries
             .iter()
@@ -333,6 +450,7 @@ impl NgdpClient {
         let mut speed_window_start = Instant::now();
         let mut speed_window_bytes = 0u64;
         let mut last_progress = Instant::now() - Duration::from_secs(1);
+        let mut installed = Vec::with_capacity(total_files);
 
         loop {
             while active < INSTALL_FILE_CONCURRENCY {
@@ -382,10 +500,12 @@ impl NgdpClient {
                 }
                 Some(result) = tasks.join_next() => {
                     active -= 1;
-                    let installed_bytes = result??;
+                    let result = result??;
+                    let installed_bytes = result.bytes;
                     completed_files += 1;
                     completed_bytes = completed_bytes.saturating_add(installed_bytes);
                     in_flight_bytes = in_flight_bytes.saturating_sub(installed_bytes);
+                    installed.push(result);
                     emit_install_progress(
                         progress,
                         completed_files,
@@ -400,7 +520,7 @@ impl NgdpClient {
         }
 
         progress(ProgressUpdate::new("Installed Hearthstone files", 0.95));
-        Ok(())
+        Ok(installed)
     }
 }
 
@@ -440,9 +560,10 @@ async fn install_one_entry(
     item: InstallWorkItem,
     out_dir: PathBuf,
     verify: bool,
-) -> Result<u64> {
+) -> Result<InstalledEntryResult> {
     trace!(
         path = %item.entry.path,
+        target_path = %item.target_path,
         content_key = %item.entry.content_key,
         encoding_key = %item.encoding_key,
         size = item.entry.size,
@@ -458,12 +579,19 @@ async fn install_one_entry(
         item.has_archive,
     )
     .await?;
-    let target = out_dir.join(&item.entry.path);
+    let target = checked_install_path(&out_dir, &item.target_path)?;
     if let Some(parent) = target.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
-    tokio::fs::write(target, decoded).await?;
-    Ok(u64::from(item.entry.size))
+    tokio::fs::write(&target, decoded).await?;
+    let metadata = tokio::fs::metadata(&target)
+        .await
+        .with_context(|| format!("failed to stat installed file {}", target.display()))?;
+    Ok(InstalledEntryResult {
+        bytes: u64::from(item.entry.size),
+        target_path: item.target_path,
+        record: installed_file_record(&item.entry, &item.encoding_key, &metadata, verify),
+    })
 }
 
 async fn fetch_install_entry(
@@ -600,6 +728,277 @@ fn decode_install_entry(
     Ok(decoded)
 }
 
+impl InstalledManifest {
+    fn for_version(
+        version: &VersionInfo,
+        options: &InstallOptions,
+        files: HashMap<String, InstalledFileRecord>,
+    ) -> Self {
+        Self {
+            version_name: version.version_name.clone(),
+            build_id: version.build_id.clone(),
+            region: options.region.to_string(),
+            locale: options.locale.to_string(),
+            files,
+        }
+    }
+
+    async fn load(out_dir: &Path) -> Result<Self> {
+        let path = installed_manifest_path(out_dir);
+        match tokio::fs::read(&path).await {
+            Ok(data) => match serde_json::from_slice(&data) {
+                Ok(manifest) => Ok(manifest),
+                Err(error) => {
+                    warn!(
+                        path = %path.display(),
+                        error = %error,
+                        "installed file manifest is invalid; ignoring it"
+                    );
+                    Ok(Self::default())
+                }
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
+            Err(error) => Err(error)
+                .with_context(|| format!("failed to read installed manifest {}", path.display())),
+        }
+    }
+
+    async fn save(&self, out_dir: &Path) -> Result<()> {
+        tokio::fs::create_dir_all(out_dir).await?;
+        let path = installed_manifest_path(out_dir);
+        let temp = path.with_extension("json.tmp");
+        let data = serde_json::to_vec_pretty(self)?;
+        tokio::fs::write(&temp, data)
+            .await
+            .with_context(|| format!("failed to write installed manifest {}", temp.display()))?;
+        tokio::fs::rename(&temp, &path)
+            .await
+            .with_context(|| format!("failed to update installed manifest {}", path.display()))?;
+        Ok(())
+    }
+}
+
+async fn scan_local_install(
+    out_dir: &Path,
+    entries: Vec<PendingInstallItem>,
+    manifest: &InstalledManifest,
+    verify: bool,
+    cancel: Option<&Arc<AtomicBool>>,
+) -> Result<LocalInstallScan> {
+    let mut missing = Vec::new();
+    let mut records = HashMap::with_capacity(entries.len());
+    let mut fast_hits = 0usize;
+    let mut verified_hits = 0usize;
+
+    for item in entries {
+        check_cancelled(cancel)?;
+        let target = checked_install_path(out_dir, &item.target_path)?;
+        let metadata = match tokio::fs::metadata(&target).await {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                missing.push(item);
+                continue;
+            }
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!("failed to stat installed file {}", target.display())
+                });
+            }
+        };
+
+        if !metadata.is_file() || metadata.len() != u64::from(item.entry.size) {
+            missing.push(item);
+            continue;
+        }
+
+        let cached = manifest.files.get(&item.target_path);
+        let cached_matches = cached.is_some_and(|record| {
+            record.content_key == item.entry.content_key
+                && record.encoding_key == item.encoding_key
+                && record.size == u64::from(item.entry.size)
+        });
+        let modified_ns = metadata_modified_ns(&metadata);
+        if cached_matches {
+            let record = cached.expect("checked above");
+            let modified_matches =
+                record.modified_ns.is_some() && record.modified_ns == modified_ns;
+            if (!verify || record.verified) && modified_matches {
+                records.insert(item.target_path, record.clone());
+                fast_hits += 1;
+                continue;
+            }
+        }
+
+        if !verify {
+            records.insert(
+                item.target_path,
+                installed_file_record(&item.entry, &item.encoding_key, &metadata, false),
+            );
+            fast_hits += 1;
+            continue;
+        }
+
+        let actual = file_md5_hex(&target).await?;
+        if actual == item.entry.content_key {
+            records.insert(
+                item.target_path,
+                installed_file_record(&item.entry, &item.encoding_key, &metadata, true),
+            );
+            verified_hits += 1;
+        } else {
+            debug!(
+                path = %target.display(),
+                expected = %item.entry.content_key,
+                actual = %actual,
+                "installed file content changed; scheduling download"
+            );
+            missing.push(item);
+        }
+    }
+
+    Ok(LocalInstallScan {
+        missing,
+        records,
+        fast_hits,
+        verified_hits,
+    })
+}
+
+async fn cleanup_stale_installed_files(
+    out_dir: &Path,
+    previous_manifest: &InstalledManifest,
+    desired_paths: &HashSet<String>,
+) -> Result<()> {
+    for target_path in previous_manifest.files.keys() {
+        if desired_paths.contains(target_path) {
+            continue;
+        }
+        let target = match checked_install_path(out_dir, target_path) {
+            Ok(target) => target,
+            Err(error) => {
+                warn!(
+                    path = %target_path,
+                    error = %format!("{error:#}"),
+                    "skipping unsafe stale NGDP-managed path"
+                );
+                continue;
+            }
+        };
+        match tokio::fs::remove_file(&target).await {
+            Ok(()) => {
+                debug!(path = %target.display(), "removed stale NGDP-managed file");
+                prune_empty_parents(out_dir, target.parent()).await;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                warn!(
+                    path = %target.display(),
+                    error = %error,
+                    "failed to remove stale NGDP-managed file"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn prune_empty_parents(root: &Path, mut current: Option<&Path>) {
+    while let Some(path) = current {
+        if path == root {
+            break;
+        }
+        match tokio::fs::remove_dir(path).await {
+            Ok(()) => current = path.parent(),
+            Err(_) => break,
+        }
+    }
+}
+
+async fn file_md5_hex(path: &Path) -> Result<String> {
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .with_context(|| format!("failed to open installed file {}", path.display()))?;
+    let mut context = md5::Context::new();
+    let mut buffer = vec![0u8; 1024 * 1024];
+    loop {
+        let read = tokio::io::AsyncReadExt::read(&mut file, &mut buffer)
+            .await
+            .with_context(|| format!("failed to read installed file {}", path.display()))?;
+        if read == 0 {
+            break;
+        }
+        context.consume(&buffer[..read]);
+    }
+    Ok(format!("{:x}", context.compute()))
+}
+
+fn installed_file_record(
+    entry: &InstallEntry,
+    encoding_key: &str,
+    metadata: &Metadata,
+    verified: bool,
+) -> InstalledFileRecord {
+    InstalledFileRecord {
+        content_key: entry.content_key.clone(),
+        encoding_key: encoding_key.to_string(),
+        size: u64::from(entry.size),
+        modified_ns: metadata_modified_ns(metadata),
+        verified,
+    }
+}
+
+fn metadata_modified_ns(metadata: &Metadata) -> Option<u64> {
+    let modified = metadata.modified().ok()?;
+    let duration = modified.duration_since(UNIX_EPOCH).ok()?;
+    u64::try_from(duration.as_nanos()).ok()
+}
+
+fn installed_manifest_path(out_dir: &Path) -> PathBuf {
+    out_dir.join(INSTALLED_MANIFEST_NAME)
+}
+
+fn installed_target_path(entry_path: &str) -> Option<String> {
+    const DATA_PREFIX: &str = "Hearthstone.app/Contents/Resources/Data/";
+    const RESOURCES_PREFIX: &str = "Hearthstone.app/Contents/Resources/";
+
+    if let Some(relative) = entry_path.strip_prefix(DATA_PREFIX) {
+        return Some(format!("Bin/Hearthstone_Data/{relative}"));
+    }
+
+    match entry_path.strip_prefix(RESOURCES_PREFIX) {
+        Some("unity default resources") => {
+            Some("Bin/Hearthstone_Data/Resources/unity default resources".to_string())
+        }
+        Some("PlayerIcon.icns") => {
+            Some("Bin/Hearthstone_Data/Resources/PlayerIcon.icns".to_string())
+        }
+        Some(_) => None,
+        None if entry_path.starts_with("Hearthstone.app/")
+            || entry_path.starts_with("Hearthstone Beta Launcher.app/") =>
+        {
+            None
+        }
+        None => Some(entry_path.to_string()),
+    }
+}
+
+fn checked_install_path(out_dir: &Path, relative: &str) -> Result<PathBuf> {
+    let path = Path::new(relative);
+    anyhow::ensure!(
+        !path.is_absolute(),
+        "install path must be relative: {relative}"
+    );
+    for component in path.components() {
+        match component {
+            Component::Normal(_) | Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                anyhow::bail!("unsafe install path: {relative}");
+            }
+        }
+    }
+    Ok(out_dir.join(path))
+}
+
 fn version_urls() -> Vec<String> {
     [Region::Us, Region::Eu, Region::Kr, Region::Cn]
         .into_iter()
@@ -657,4 +1056,108 @@ pub(crate) fn read_cstr(cursor: &mut std::io::Cursor<&[u8]>) -> Result<String> {
 
 pub(crate) fn read_be_u24(bytes: &[u8]) -> u32 {
     ((bytes[0] as u32) << 16) | ((bytes[1] as u32) << 8) | bytes[2] as u32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_macos_resource_entries_to_linux_layout() {
+        assert_eq!(
+            installed_target_path("Hearthstone.app/Contents/Resources/Data/level0"),
+            Some("Bin/Hearthstone_Data/level0".to_string())
+        );
+        assert_eq!(
+            installed_target_path("Hearthstone.app/Contents/Resources/unity default resources"),
+            Some("Bin/Hearthstone_Data/Resources/unity default resources".to_string())
+        );
+        assert_eq!(
+            installed_target_path("Hearthstone.app/Contents/Resources/PlayerIcon.icns"),
+            Some("Bin/Hearthstone_Data/Resources/PlayerIcon.icns".to_string())
+        );
+        assert_eq!(
+            installed_target_path("Strings/enUS.txt"),
+            Some("Strings/enUS.txt".to_string())
+        );
+        assert_eq!(
+            installed_target_path("Hearthstone.app/Contents/MacOS/Hearthstone"),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn scan_local_install_skips_manifest_verified_file_without_hashing() {
+        let temp = tempfile::tempdir().unwrap();
+        let target_path =
+            installed_target_path("Hearthstone.app/Contents/Resources/Data/level0").unwrap();
+        let target = temp.path().join(&target_path);
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, b"level").unwrap();
+
+        let entry = InstallEntry {
+            path: "Hearthstone.app/Contents/Resources/Data/level0".to_string(),
+            content_key: format!("{:x}", md5::compute(b"level")),
+            size: 5,
+        };
+        let metadata = std::fs::metadata(&target).unwrap();
+        let record = installed_file_record(&entry, "encoding-key", &metadata, true);
+        let manifest = InstalledManifest {
+            files: HashMap::from([(target_path.clone(), record)]),
+            ..InstalledManifest::default()
+        };
+
+        let scan = scan_local_install(
+            temp.path(),
+            vec![PendingInstallItem {
+                entry,
+                encoding_key: "encoding-key".to_string(),
+                target_path,
+            }],
+            &manifest,
+            true,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert!(scan.missing.is_empty());
+        assert_eq!(scan.fast_hits, 1);
+        assert_eq!(scan.verified_hits, 0);
+        assert_eq!(scan.records.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn scan_local_install_verifies_file_when_manifest_is_missing() {
+        let temp = tempfile::tempdir().unwrap();
+        let target_path =
+            installed_target_path("Hearthstone.app/Contents/Resources/Data/level0").unwrap();
+        let target = temp.path().join(&target_path);
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, b"level").unwrap();
+
+        let entry = InstallEntry {
+            path: "Hearthstone.app/Contents/Resources/Data/level0".to_string(),
+            content_key: format!("{:x}", md5::compute(b"level")),
+            size: 5,
+        };
+        let scan = scan_local_install(
+            temp.path(),
+            vec![PendingInstallItem {
+                entry,
+                encoding_key: "encoding-key".to_string(),
+                target_path,
+            }],
+            &InstalledManifest::default(),
+            true,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert!(scan.missing.is_empty());
+        assert_eq!(scan.fast_hits, 0);
+        assert_eq!(scan.verified_hits, 1);
+        assert_eq!(scan.records.len(), 1);
+    }
 }

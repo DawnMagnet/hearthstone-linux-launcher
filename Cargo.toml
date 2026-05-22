@@ -1,6 +1,6 @@
 [package]
 name = "hearthstone-linux-gui"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 license = "MIT"
 description = "Native GTK4 Linux GUI manager for crafting and launching Hearthstone"
@@ -13,12 +13,14 @@ path = "src/lib.rs"
 members = [
     ".",
     "crates/stubs/blz-commerce-sdk-plugin",
+    "crates/stubs/commerce-http-client",
     "crates/stubs/core-foundation",
     "crates/stubs/osx-window-management",
 ]
 default-members = [
     ".",
     "crates/stubs/blz-commerce-sdk-plugin",
+    "crates/stubs/commerce-http-client",
     "crates/stubs/core-foundation",
     "crates/stubs/osx-window-management",
 ]

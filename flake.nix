@@ -45,9 +45,9 @@
             ];
         };
         pname = "hearthstone-linux-gui";
-        packageVersion = "0.1.2";
+        packageVersion = "0.1.4";
         appId = "io.github.hearthstone_linux_gui";
-        appImageFile = "hearthstone-linux-gui-x86_64.AppImage";
+        appImageFile = "${pname}-${packageVersion}-x86_64.AppImage";
         desktopFile = "${appId}.desktop";
         iconFile = "${appId}.svg";
         x11RuntimeInputs = with pkgs; [
@@ -197,6 +197,8 @@
               $out/share/hearthstone-linux-gui/stubs/libOSXWindowManagement.so
             install -Dm755 "$target_dir/libblz_commerce_sdk_plugin.so" \
               $out/share/hearthstone-linux-gui/stubs/libblz_commerce_sdk_plugin.so
+            install -Dm755 "$target_dir/libcommerce_http_client.so" \
+              $out/share/hearthstone-linux-gui/stubs/libcommerce_http_client.so
           '';
         };
         appimageTool = pkgs.appimageTools.extractType2 {
@@ -429,7 +431,7 @@
             '';
         packageFromAppImage =
           packager: extension:
-          pkgs.runCommand "hearthstone-linux-gui-${extension}"
+          pkgs.runCommand "${pname}-${packageVersion}-${extension}"
             {
               nativeBuildInputs = with pkgs; [
                 coreutils
@@ -493,6 +495,10 @@
               EOF
 
               nfpm package --config nfpm.yaml --packager ${packager} --target $out
+              package="$(find "$out" -maxdepth 1 -type f -name "*.${extension}" -print -quit)"
+              if [ -n "$package" ]; then
+                mv "$package" "$out/${pname}-${packageVersion}-x86_64.${extension}"
+              fi
             '';
         debPackage = packageFromAppImage "deb" "deb";
         rpmPackage = packageFromAppImage "rpm" "rpm";
@@ -505,7 +511,7 @@
         packages.AppImage = appImage;
         packages.Deb = debPackage;
         packages.Rpm = rpmPackage;
-        packages.AllDist = pkgs.runCommand "hearthstone-linux-gui-AllDist" { } ''
+        packages.AllDist = pkgs.runCommand "${pname}-${packageVersion}-AllDist" { } ''
           mkdir -p $out/nix $out/appimage $out/deb $out/rpm
           ln -s ${hearthstonePackage} $out/nix/hearthstone-linux-gui
           ln -s ${hearthstoneRuntime} $out/nix/hearthstone-linux-gui-runtime

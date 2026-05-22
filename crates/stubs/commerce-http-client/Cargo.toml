@@ -1,9 +1,9 @@
 [package]
-name = "hearthstone-linux-gui-core-foundation-stub"
+name = "hearthstone-linux-gui-commerce-http-client-stub"
 version = "0.1.4"
 edition = "2021"
 license = "MIT"
 
 [lib]
-name = "CoreFoundation"
+name = "commerce_http_client"
 crate-type = ["cdylib"]

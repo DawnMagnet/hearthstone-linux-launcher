@@ -872,7 +872,7 @@ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
 name = "hearthstone-linux-gui"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "aes",
  "anyhow",
@@ -907,15 +907,19 @@ dependencies = [
 
 [[package]]
 name = "hearthstone-linux-gui-blz-commerce-sdk-plugin-stub"
-version = "0.1.2"
+version = "0.1.4"
+
+[[package]]
+name = "hearthstone-linux-gui-commerce-http-client-stub"
+version = "0.1.4"
 
 [[package]]
 name = "hearthstone-linux-gui-core-foundation-stub"
-version = "0.1.2"
+version = "0.1.4"
 
 [[package]]
 name = "hearthstone-linux-gui-osx-window-management-stub"
-version = "0.1.2"
+version = "0.1.4"
 
 [[package]]
 name = "heck"

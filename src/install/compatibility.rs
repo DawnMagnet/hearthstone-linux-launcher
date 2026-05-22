@@ -31,6 +31,14 @@ pub fn install_compatibility_files(game_dir: &Path, region: Region, locale: Loca
         &stubs.blz_commerce_sdk_plugin,
         &game_dir.join("Bin/Hearthstone_Data/Plugins/libblz_commerce_sdk_plugin.so"),
     )?;
+    copy_required(
+        &stubs.commerce_http_client,
+        &game_dir.join("Bin/Hearthstone_Data/Plugins/libcommerce_http_client.so"),
+    )?;
+    copy_required(
+        &stubs.commerce_http_client,
+        &game_dir.join("Bin/Hearthstone_Data/MonoBleedingEdge/x86_64/libcommerce_http_client.so"),
+    )?;
     Ok(())
 }
 
@@ -38,6 +46,7 @@ struct StubFiles {
     core_foundation: PathBuf,
     osx_window_management: PathBuf,
     blz_commerce_sdk_plugin: PathBuf,
+    commerce_http_client: PathBuf,
 }
 
 fn copy_required(from: &Path, to: &Path) -> Result<()> {
@@ -95,10 +104,12 @@ fn stub_files_in(dir: PathBuf) -> Result<StubFiles> {
         core_foundation: dir.join("CoreFoundation.so"),
         osx_window_management: dir.join("libOSXWindowManagement.so"),
         blz_commerce_sdk_plugin: dir.join("libblz_commerce_sdk_plugin.so"),
+        commerce_http_client: dir.join("libcommerce_http_client.so"),
     };
     if files.core_foundation.exists()
         && files.osx_window_management.exists()
         && files.blz_commerce_sdk_plugin.exists()
+        && files.commerce_http_client.exists()
     {
         return Ok(files);
     }
@@ -117,10 +128,12 @@ fn dev_stub_files() -> Result<Option<StubFiles>> {
             core_foundation: dir.join("libCoreFoundation.so"),
             osx_window_management: dir.join("libOSXWindowManagement.so"),
             blz_commerce_sdk_plugin: dir.join("libblz_commerce_sdk_plugin.so"),
+            commerce_http_client: dir.join("libcommerce_http_client.so"),
         };
         if files.core_foundation.exists()
             && files.osx_window_management.exists()
             && files.blz_commerce_sdk_plugin.exists()
+            && files.commerce_http_client.exists()
         {
             return Ok(Some(files));
         }

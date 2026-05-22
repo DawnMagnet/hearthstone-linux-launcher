@@ -206,18 +206,10 @@ fn format_bytes(bytes: f64) -> String {
 
 async fn cleanup_installation(game_dir: &std::path::Path) -> Result<()> {
     tokio::fs::create_dir_all(game_dir).await?;
-    for name in [
-        "Bin/Hearthstone_Data",
-        "Data",
-        "Strings",
-        "Logs",
-        "BlizzardBrowser",
-        "Hearthstone.app",
-        "Hearthstone Beta Launcher.app",
-    ] {
+    for name in ["Hearthstone.app", "Hearthstone Beta Launcher.app"] {
         let path = game_dir.join(name);
         if path.exists() {
-            debug!(path = %path.display(), "removing previous install path");
+            debug!(path = %path.display(), "removing legacy install path");
             let _ = tokio::fs::remove_dir_all(&path).await;
             let _ = tokio::fs::remove_file(&path).await;
         }
