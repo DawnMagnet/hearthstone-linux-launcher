@@ -4,7 +4,7 @@ use libadwaita as adw;
 use adw::prelude::*;
 use gtk::{gio, glib};
 use hearthstone_linux::{
-    auth,
+    auth::{self, start_local_callback_server, LocalCallbackServer},
     config::{AppConfig, Locale, Region},
     install::{
         launcher,
@@ -25,6 +25,7 @@ use std::{
 
 struct LoginSession {
     cancel: Arc<AtomicBool>,
+    callback: Rc<LocalCallbackServer>,
 }
 
 pub fn run() {
@@ -311,6 +312,7 @@ fn build_window(app: &adw::Application) {
             if let Some(session) = login_session.borrow_mut().take() {
                 tracing::info!("login wait cancelled from UI");
                 session.cancel.store(true, Ordering::Relaxed);
+                session.callback.cancel.store(true, Ordering::Relaxed);
                 set_login_idle(&login_button, &paths);
                 status.set_text("Login cancelled");
                 return;
@@ -638,6 +640,7 @@ fn begin_login(
     let login_url = current.region.login_url().to_string();
     *login_session.borrow_mut() = Some(LoginSession {
         cancel: Arc::new(AtomicBool::new(false)),
+        callback: Rc::new(start_local_callback_server((*paths).clone(), current.region).unwrap()),
     });
 
     if let Err(error) = ensure_auth_scheme_handlers() {
