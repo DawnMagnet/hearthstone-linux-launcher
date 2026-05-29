@@ -1,34 +1,11 @@
 # Packaging
 
-Nix is the single source of truth for release builds. The helper scripts in
-this directory are thin wrappers around flake targets; they do not duplicate
-packaging logic.
+Nix is the source of truth for release builds.
 
-This project has three release tracks:
+This project exposes two build tracks:
 
-- `nix`: a native Nix package from `flake.nix`.
-- `appimage`: a self-contained x86_64 AppImage for general Linux use.
-- `deb-rpm`: `.deb` and `.rpm` packages that install the AppImage payload.
-
-The `.deb` and `.rpm` packages intentionally reuse the AppImage instead of
-linking the GTK/libadwaita launcher against each target distro. That keeps the
-package-format installers broad while the AppImage carries the portable runtime.
-
-## All Artifacts
-
-Build everything with one command:
-
-```sh
-nix build .#AllDist
-```
-
-The output contains:
-
-- `nix/hearthstone-linux-gui`: native Nix package output.
-- `nix/hearthstone-linux-gui-runtime`: Nix runtime wrapper for the Unity player.
-- `appimage/*.AppImage`: portable x86_64 AppImage.
-- `deb/*.deb`: Debian package that installs the AppImage payload.
-- `rpm/*.rpm`: RPM package that installs the AppImage payload.
+- `nix`: the native Nix package from `flake.nix`.
+- `appimage`: a portable x86_64 AppImage defined in `nix/appimage.nix`.
 
 ## Nix
 
@@ -38,7 +15,7 @@ Build the native package:
 nix build .#default
 ```
 
-Build only the Nix runtime wrapper used to launch the downloaded Unity player:
+Build the Nix runtime wrapper used to launch the downloaded Unity player:
 
 ```sh
 nix build .#runtime
@@ -46,23 +23,11 @@ nix build .#runtime
 
 ## AppImage
 
-Build only the AppImage:
+Build the AppImage:
 
 ```sh
 nix build .#AppImage
 ```
 
-`packaging/appimage/build.sh` is a convenience wrapper that copies this output
+`packaging/appimage/build.sh` is a convenience wrapper that copies the AppImage
 to `dist/`.
-
-## Deb/RPM
-
-Build only one package format:
-
-```sh
-nix build .#Deb
-nix build .#Rpm
-```
-
-`packaging/deb-rpm/build.sh` is a convenience wrapper that copies both package
-formats from `.#AllDist` to `dist/packages/`.

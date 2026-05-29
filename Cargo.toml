@@ -30,7 +30,7 @@ resolver = "2"
 
 [features]
 default = ["gui"]
-gui = ["dep:gtk4", "dep:libadwaita"]
+gui = ["dep:relm4"]
 
 [dependencies]
 aes = "0.8"
@@ -60,8 +60,7 @@ walkdir = "2"
 xz2 = "0.1"
 xdg = "3"
 
-gtk4 = { version = "0.10", optional = true }
-libadwaita = { version = "0.8", optional = true }
+relm4 = { version = "0.10", features = ["libadwaita"], optional = true }
 
 [dev-dependencies]
 tempfile = "3"

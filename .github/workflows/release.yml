@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   build-dist:
-    name: Build distribution artifacts
+    name: Build Nix release artifacts
     runs-on: ubuntu-latest
     timeout-minutes: 180
 
@@ -62,64 +62,29 @@ jobs:
             exit 1
           fi
 
-      - name: Build all distribution artifacts
-        id: build
+      - name: Build native Nix package
         shell: bash
         run: |
           set -euo pipefail
-          out_path="$(nix build .#AllDist --print-out-paths)"
+          nix build .#default --print-out-paths
+
+      - name: Build AppImage
+        id: appimage
+        shell: bash
+        run: |
+          set -euo pipefail
+          out_path="$(nix build .#AppImage --print-out-paths)"
           echo "out_path=${out_path}" >> "$GITHUB_OUTPUT"
-          find -L "$out_path" -maxdepth 3 -type f -printf '%p %s bytes\n' | sort
-
-      - name: Build native package artifacts
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf native-dist
-          mkdir -p native-dist
-          docker build \
-            --target dist \
-            --file packaging/native/Dockerfile \
-            --output type=local,dest=native-dist \
-            .
-
-          find native-dist -type f -printf '%p %s bytes\n' | sort
+          find -L "$out_path" -maxdepth 2 -type f -printf '%p %s bytes\n' | sort
 
       - name: Stage release files
         shell: bash
         run: |
           set -euo pipefail
-          out_path="${{ steps.build.outputs.out_path }}"
-          mkdir -p \
-            release-dist/appimage \
-            release-dist/deb \
-            release-dist/rpm \
-            release-dist/native/deb \
-            release-dist/native/rpm \
-            release-dist/native/pacman
+          out_path="${{ steps.appimage.outputs.out_path }}"
+          mkdir -p release-dist/appimage
 
-          cp -L "$out_path"/appimage/*.AppImage release-dist/appimage/
-          cp -L "$out_path"/deb/*.deb release-dist/deb/
-          cp -L "$out_path"/rpm/*.rpm release-dist/rpm/
-          cp -L "$out_path"/README.txt release-dist/
-
-          for file in native-dist/*.deb; do
-            [ -e "$file" ] || continue
-            name="$(basename "$file")"
-            cp -L "$file" "release-dist/native/deb/${name%.deb}-native.deb"
-          done
-
-          for file in native-dist/*.rpm; do
-            [ -e "$file" ] || continue
-            name="$(basename "$file")"
-            cp -L "$file" "release-dist/native/rpm/${name%.rpm}-native.rpm"
-          done
-
-          for file in native-dist/*.pkg.tar.zst; do
-            [ -e "$file" ] || continue
-            name="$(basename "$file")"
-            cp -L "$file" "release-dist/native/pacman/${name%.pkg.tar.zst}-native.pkg.tar.zst"
-          done
+          cp -L "$out_path"/*.AppImage release-dist/appimage/
 
           (
             cd release-dist
@@ -153,59 +118,11 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Upload Debian package artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: hearthstone-linux-gui-${{ steps.names.outputs.artifact_suffix }}-deb
-          path: release-dist/deb/*.deb
-          if-no-files-found: error
-          retention-days: 90
-
-      - name: Upload RPM package artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: hearthstone-linux-gui-${{ steps.names.outputs.artifact_suffix }}-rpm
-          path: release-dist/rpm/*.rpm
-          if-no-files-found: error
-          retention-days: 90
-
-      - name: Upload native Debian package artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: hearthstone-linux-gui-${{ steps.names.outputs.artifact_suffix }}-native-deb
-          path: release-dist/native/deb/*.deb
-          if-no-files-found: error
-          retention-days: 90
-
-      - name: Upload native RPM package artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: hearthstone-linux-gui-${{ steps.names.outputs.artifact_suffix }}-native-rpm
-          path: release-dist/native/rpm/*.rpm
-          if-no-files-found: error
-          retention-days: 90
-
-      - name: Upload native pacman package artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: hearthstone-linux-gui-${{ steps.names.outputs.artifact_suffix }}-native-pacman
-          path: release-dist/native/pacman/*.pkg.tar.zst
-          if-no-files-found: error
-          retention-days: 90
-
       - name: Upload checksums artifact
         uses: actions/upload-artifact@v4
         with:
           name: hearthstone-linux-gui-${{ steps.names.outputs.artifact_suffix }}-checksums
           path: release-dist/SHA256SUMS.txt
-          if-no-files-found: error
-          retention-days: 90
-
-      - name: Upload complete distribution artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: hearthstone-linux-gui-${{ steps.names.outputs.artifact_suffix }}-all-dist
-          path: release-dist/**
           if-no-files-found: error
           retention-days: 90
 
@@ -220,9 +137,7 @@ jobs:
           ## Downloads
 
           - AppImage: portable x86_64 build for general Linux use.
-          - DEB: installs the AppImage payload and desktop integration on Debian/Ubuntu-style systems.
-          - RPM: installs the AppImage payload and desktop integration on Fedora/RHEL-style systems.
-          - Native DEB/RPM/pacman: distro packages built directly from the native Dockerfile, marked with the \`-native\` filename suffix.
+          - Nix users can build the native package with \`nix build github:${GITHUB_REPOSITORY}/${GITHUB_REF_NAME}\`.
 
           ## Verification
 
@@ -247,7 +162,7 @@ jobs:
           fi
 
           mapfile -t assets < <(find release-dist -type f \
-            \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' -o -name '*.pkg.tar.zst' -o -name 'SHA256SUMS.txt' -o -name 'README.txt' \) \
+            \( -name '*.AppImage' -o -name 'SHA256SUMS.txt' \) \
             | sort)
 
           if gh release view "$tag" >/dev/null 2>&1; then
