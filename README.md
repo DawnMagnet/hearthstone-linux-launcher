@@ -7,7 +7,7 @@
 <p align="center">
   <a href="README.cn.md">中文说明</a>
   ·
-  <a href="https://github.com/DawnMagnet/hearthstone-linux-launcher/releases/latest">Latest release</a>
+  <a href="https://github.com/DawnMagnet/hearthstone-linux-gui/releases/latest">Latest release</a>
 </p>
 
 <p align="center">
@@ -88,7 +88,7 @@ comes from the same source, version, and dependency graph.
 ## Installation For Users
 
 1. Open the
-   [latest release page](https://github.com/DawnMagnet/hearthstone-linux-launcher/releases/latest).
+   [latest release page](https://github.com/DawnMagnet/hearthstone-linux-gui/releases/latest).
 2. Download the package that matches your system.
 3. Open it with your desktop environment:
    - AppImage: open the downloaded AppImage. If your file manager asks for it,
@@ -108,6 +108,98 @@ After the app opens, the normal flow is:
 The app stores user data under standard XDG locations in your home directory.
 Interrupted Unity downloads are resumed automatically, and already downloaded
 game data is reused when possible.
+
+## Nix, NixOS, And Home Manager
+
+This repository is a flake for `x86_64-linux`. It currently exposes package,
+app, and development shell outputs; it does not expose dedicated NixOS or Home
+Manager modules. Use the package output in your system or home package list.
+
+Run the application directly from GitHub:
+
+```sh
+nix run github:DawnMagnet/hearthstone-linux-gui
+```
+
+Build outputs from a local checkout:
+
+```sh
+nix build .#default
+nix build .#AppImage
+nix build .#runtime
+```
+
+The available flake outputs are:
+
+| Output | Purpose |
+| --- | --- |
+| `packages.x86_64-linux.default` | Native Nix package for the GTK launcher |
+| `packages.x86_64-linux.runtime` | FHS runtime wrapper used to launch the downloaded Unity player |
+| `packages.x86_64-linux.AppImage` | Portable AppImage build |
+| `packages.x86_64-linux.AppDir` | Intermediate AppDir used to build the AppImage |
+| `apps.x86_64-linux.default` | `nix run` entrypoint |
+| `devShells.x86_64-linux.default` | Rust/GTK development shell |
+
+For NixOS flakes, add the repository as an input and install the package with
+`environment.systemPackages`:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    hearthstone-linux-gui.url = "github:DawnMagnet/hearthstone-linux-gui";
+  };
+
+  outputs = { nixpkgs, hearthstone-linux-gui, ... }: {
+    nixosConfigurations.my-host = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [
+        ({ pkgs, ... }: {
+          environment.systemPackages = [
+            hearthstone-linux-gui.packages.${pkgs.stdenv.hostPlatform.system}.default
+          ];
+        })
+      ];
+    };
+  };
+}
+```
+
+For standalone Home Manager flakes, add it to `home.packages`:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    home-manager.url = "github:nix-community/home-manager";
+    hearthstone-linux-gui.url = "github:DawnMagnet/hearthstone-linux-gui";
+  };
+
+  outputs = { nixpkgs, home-manager, hearthstone-linux-gui, ... }:
+    let
+      system = "x86_64-linux";
+      pkgs = nixpkgs.legacyPackages.${system};
+    in
+    {
+      homeConfigurations.my-user = home-manager.lib.homeManagerConfiguration {
+        inherit pkgs;
+        modules = [
+          {
+            home.username = "my-user";
+            home.homeDirectory = "/home/my-user";
+            home.stateVersion = "25.05";
+            home.packages = [
+              hearthstone-linux-gui.packages.${system}.default
+            ];
+          }
+        ];
+      };
+    };
+}
+```
+
+If you use Home Manager as a NixOS module, put the same package expression in
+`home-manager.users.<name>.home.packages`.
 
 ## How It Works
 
