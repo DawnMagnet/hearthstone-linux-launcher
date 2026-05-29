@@ -45,7 +45,7 @@
             ];
         };
         pname = "hearthstone-linux-gui";
-        packageVersion = "0.1.4";
+        packageVersion = "0.1.5";
         appId = "io.github.hearthstone_linux_gui";
         appImageFile = "${pname}-${packageVersion}-x86_64.AppImage";
         desktopFile = "${appId}.desktop";
